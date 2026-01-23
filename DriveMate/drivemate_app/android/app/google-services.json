@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "98973897901",
+    "project_id": "drivemate-ac4ad",
+    "storage_bucket": "drivemate-ac4ad.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:98973897901:android:49e93f76bf9afab7c1a224",
+        "android_client_info": {
+          "package_name": "app.techsol.drivemate"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQpYeZKWyyt9oXbPEZdYxLeyFIrd8R4FE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
