@@ -1,0 +1,656 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+
+import '../models/access_request.dart';
+import '../models/cancellation_request.dart';
+import '../models/lesson.dart';
+import '../models/payment.dart';
+import '../models/school.dart';
+import '../models/school_instructor.dart';
+import '../models/student.dart';
+import '../models/terms.dart';
+import '../models/user_profile.dart';
+
+class FirestoreService {
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  CollectionReference<Map<String, dynamic>> get _users =>
+      _db.collection('users');
+  CollectionReference<Map<String, dynamic>> get _students =>
+      _db.collection('students');
+  CollectionReference<Map<String, dynamic>> get _lessons =>
+      _db.collection('lessons');
+  CollectionReference<Map<String, dynamic>> get _payments =>
+      _db.collection('payments');
+  CollectionReference<Map<String, dynamic>> get _terms =>
+      _db.collection('terms');
+  CollectionReference<Map<String, dynamic>> get _schools =>
+      _db.collection('schools');
+  CollectionReference<Map<String, dynamic>> get _schoolInstructors =>
+      _db.collection('school_instructors');
+  CollectionReference<Map<String, dynamic>> get _accessRequests =>
+      _db.collection('access_requests');
+  CollectionReference<Map<String, dynamic>> get _cancellationRequests =>
+      _db.collection('cancellation_requests');
+  CollectionReference<Map<String, dynamic>> get _instructorNotifications =>
+      _db.collection('instructor_notifications');
+
+  Stream<UserProfile?> streamUserProfile(String uid) {
+    return _users.doc(uid).snapshots().map((doc) {
+      if (!doc.exists) return null;
+      return UserProfile.fromDoc(doc);
+    });
+  }
+
+  Future<UserProfile?> getUserProfile(String uid) async {
+    final doc = await _users.doc(uid).get();
+    if (!doc.exists) return null;
+    return UserProfile.fromDoc(doc);
+  }
+
+  Stream<School?> streamSchool(String schoolId) {
+    return _schools.doc(schoolId).snapshots().map((doc) {
+      if (!doc.exists) return null;
+      return School.fromDoc(doc);
+    });
+  }
+
+  Stream<List<SchoolInstructor>> streamSchoolInstructors(String schoolId) {
+    return _schoolInstructors
+        .where('schoolId', isEqualTo: schoolId)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(SchoolInstructor.fromDoc).toList());
+  }
+
+  Stream<SchoolInstructor?> streamInstructorSchoolLink(String instructorId) {
+    return _schoolInstructors
+        .where('instructorId', isEqualTo: instructorId)
+        .limit(1)
+        .snapshots()
+        .map((snapshot) {
+      if (snapshot.docs.isEmpty) return null;
+      return SchoolInstructor.fromDoc(snapshot.docs.first);
+    });
+  }
+
+  Stream<List<AccessRequest>> streamAccessRequestsForInstructor(
+    String instructorId,
+  ) {
+    return _accessRequests
+        .where('instructorId', isEqualTo: instructorId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(AccessRequest.fromDoc).toList());
+  }
+
+  Stream<List<AccessRequest>> streamAccessRequestsForSchool(String schoolId) {
+    return _accessRequests
+        .where('schoolId', isEqualTo: schoolId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(AccessRequest.fromDoc).toList());
+  }
+
+  Stream<Terms?> streamTermsForSchool(String schoolId) {
+    return _terms.doc(schoolId).snapshots().map((doc) {
+      if (!doc.exists) return null;
+      return Terms.fromDoc(doc);
+    });
+  }
+
+  Future<Terms?> getTermsForSchool(String schoolId) async {
+    final doc = await _terms.doc(schoolId).get();
+    if (!doc.exists) return null;
+    return Terms.fromDoc(doc);
+  }
+
+  Future<void> saveSchoolTerms({
+    required String schoolId,
+    required String text,
+  }) {
+    final docRef = _terms.doc(schoolId);
+    return _db.runTransaction((tx) async {
+      final snap = await tx.get(docRef);
+      final currentVersion = (snap.data()?['version'] ?? 0) as int;
+      final nextVersion = currentVersion + 1;
+      tx.set(docRef, {
+        'text': text.trim(),
+        'version': nextVersion,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
+  Stream<UserProfile?> streamUserProfileByStudentId(String studentId) {
+    return _users
+        .where('studentId', isEqualTo: studentId)
+        .limit(1)
+        .snapshots()
+        .map((snapshot) {
+      if (snapshot.docs.isEmpty) return null;
+      return UserProfile.fromDoc(snapshot.docs.first);
+    });
+  }
+
+  Future<UserProfile?> getUserProfileByStudentId(String studentId) async {
+    final snapshot = await _users
+        .where('studentId', isEqualTo: studentId)
+        .limit(1)
+        .get();
+    if (snapshot.docs.isEmpty) return null;
+    return UserProfile.fromDoc(snapshot.docs.first);
+  }
+
+  Future<void> createUserProfile(UserProfile profile) {
+    return _users.doc(profile.id).set(profile.toMap());
+  }
+
+  Future<void> updateUserProfile(String uid, Map<String, dynamic> data) {
+    return _users.doc(uid).update(data);
+  }
+
+  Future<String> createSchool({
+    required String ownerId,
+    required String name,
+  }) async {
+    final doc = await _schools.add({
+      'ownerId': ownerId,
+      'name': name,
+      'status': 'active',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    return doc.id;
+  }
+
+  Future<String> ensurePersonalSchool({
+    required UserProfile instructor,
+  }) async {
+    if (instructor.schoolId != null && instructor.schoolId!.isNotEmpty) {
+      return instructor.schoolId!;
+    }
+    final schoolId = await createSchool(
+      ownerId: instructor.id,
+      name: '${instructor.name} School',
+    );
+    await _schoolInstructors.add({
+      'schoolId': schoolId,
+      'instructorId': instructor.id,
+      'feeAmount': 0,
+      'feeFrequency': 'week',
+      'active': true,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    await updateUserProfile(instructor.id, {'schoolId': schoolId});
+    return schoolId;
+  }
+
+  Future<String> addInstructorToSchool({
+    required String schoolId,
+    required String instructorId,
+    required double feeAmount,
+    required String feeFrequency,
+  }) async {
+    final doc = await _schoolInstructors.add({
+      'schoolId': schoolId,
+      'instructorId': instructorId,
+      'feeAmount': feeAmount,
+      'feeFrequency': feeFrequency,
+      'active': true,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    return doc.id;
+  }
+
+  Future<void> updateSchoolInstructorFee({
+    required String linkId,
+    required double feeAmount,
+    required String feeFrequency,
+  }) {
+    return _schoolInstructors.doc(linkId).update({
+      'feeAmount': feeAmount,
+      'feeFrequency': feeFrequency,
+    });
+  }
+
+  Future<void> requestAccess({
+    required String schoolId,
+    required String ownerId,
+    required String instructorId,
+  }) {
+    return _accessRequests.add({
+      'schoolId': schoolId,
+      'ownerId': ownerId,
+      'instructorId': instructorId,
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> respondToAccessRequest({
+    required String requestId,
+    required String status,
+  }) {
+    return _accessRequests.doc(requestId).update({
+      'status': status,
+      'respondedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Stream<List<Student>> streamStudents(
+    String instructorId, {
+    String? status,
+  }) {
+    Query<Map<String, dynamic>> query =
+        _students.where('instructorId', isEqualTo: instructorId);
+    if (status != null && status != 'all') {
+      query = query.where('status', isEqualTo: status);
+    }
+    return query.snapshots().map((snapshot) {
+      final students = snapshot.docs.map(Student.fromDoc).toList();
+      students.sort((a, b) => a.name.toLowerCase().compareTo(
+            b.name.toLowerCase(),
+          ));
+      return students;
+    });
+  }
+
+  Stream<Student?> streamStudentById(String studentId) {
+    return _students.doc(studentId).snapshots().map((doc) {
+      if (!doc.exists) return null;
+      return Student.fromDoc(doc);
+    });
+  }
+
+  Stream<List<Lesson>> streamLessonsForInstructor(String instructorId) {
+    return _lessons
+        .where('instructorId', isEqualTo: instructorId)
+        .orderBy('startAt')
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(Lesson.fromDoc).toList());
+  }
+
+  Stream<List<Lesson>> streamLessonsForStudent(String studentId) {
+    return _lessons
+        .where('studentId', isEqualTo: studentId)
+        .orderBy('startAt')
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(Lesson.fromDoc).toList());
+  }
+
+  Stream<List<Payment>> streamPaymentsForInstructor(String instructorId) {
+    return _payments
+        .where('instructorId', isEqualTo: instructorId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(Payment.fromDoc).toList());
+  }
+
+  Stream<List<Payment>> streamPaymentsForStudent(String studentId) {
+    return _payments
+        .where('studentId', isEqualTo: studentId)
+        .snapshots()
+        .map((snapshot) {
+      debugPrint(
+        '[payments] studentId=$studentId docs=${snapshot.docs.length}',
+      );
+      for (final doc in snapshot.docs) {
+        debugPrint('[payments] doc=${doc.id} data=${doc.data()}');
+      }
+      final payments = snapshot.docs.map(Payment.fromDoc).toList();
+      payments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return payments;
+    });
+  }
+
+  Future<Student?> getStudentById(String studentId) async {
+    final doc = await _students.doc(studentId).get();
+    if (!doc.exists) return null;
+    return Student.fromDoc(doc);
+  }
+
+  Future<String> addStudent(Student student) async {
+    final doc = await _students.add(student.toMap());
+    return doc.id;
+  }
+
+  Future<void> updateStudent(String studentId, Map<String, dynamic> data) {
+    return _students.doc(studentId).update(data);
+  }
+
+  Future<void> deleteStudent(String studentId) {
+    return _students.doc(studentId).delete();
+  }
+
+  Future<void> addPayment({
+    required Payment payment,
+    required String studentId,
+  }) {
+    final paymentRef = _payments.doc();
+    final studentRef = _students.doc(studentId);
+    debugPrint(
+      '[addPayment] studentId=$studentId data=${payment.toMap()}',
+    );
+    return _db.runTransaction((tx) async {
+      final snap = await tx.get(studentRef);
+      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
+      tx.set(paymentRef, payment.toMap());
+      tx.update(studentRef, {
+        'balanceHours': current + payment.hoursPurchased,
+      });
+    });
+  }
+
+  Future<void> updatePayment({
+    required Payment payment,
+    required double previousHours,
+  }) {
+    final paymentRef = _payments.doc(payment.id);
+    final studentRef = _students.doc(payment.studentId);
+    final hoursDelta = payment.hoursPurchased - previousHours;
+    return _db.runTransaction((tx) async {
+      final snap = await tx.get(studentRef);
+      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
+      tx.update(paymentRef, {
+        'amount': payment.amount,
+        'currency': payment.currency,
+        'method': payment.method,
+        'hoursPurchased': payment.hoursPurchased,
+      });
+      if (hoursDelta != 0) {
+        tx.update(studentRef, {
+          'balanceHours': current + hoursDelta,
+        });
+      }
+    });
+  }
+
+  Future<void> deletePayment(Payment payment) {
+    final paymentRef = _payments.doc(payment.id);
+    final studentRef = _students.doc(payment.studentId);
+    return _db.runTransaction((tx) async {
+      final snap = await tx.get(studentRef);
+      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
+      tx.delete(paymentRef);
+      tx.update(studentRef, {
+        'balanceHours': current - payment.hoursPurchased,
+      });
+    });
+  }
+
+  Future<void> addLesson({
+    required Lesson lesson,
+    required String studentId,
+  }) {
+    final lessonRef = _lessons.doc();
+    final studentRef = _students.doc(studentId);
+    return _db.runTransaction((tx) async {
+      final snap = await tx.get(studentRef);
+      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
+      tx.set(lessonRef, lesson.toMap());
+      tx.update(studentRef, {
+        'balanceHours': current - lesson.durationHours,
+      });
+    });
+  }
+
+  Future<void> updateLesson({
+    required Lesson lesson,
+    required double previousDuration,
+  }) {
+    final lessonRef = _lessons.doc(lesson.id);
+    final studentRef = _students.doc(lesson.studentId);
+    final durationDelta = lesson.durationHours - previousDuration;
+    return _db.runTransaction((tx) async {
+      final snap = await tx.get(studentRef);
+      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
+      tx.update(lessonRef, {
+        'startAt': Timestamp.fromDate(lesson.startAt),
+        'durationHours': lesson.durationHours,
+        'notes': lesson.notes,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      if (durationDelta != 0) {
+        tx.update(studentRef, {
+          'balanceHours': current - durationDelta,
+        });
+      }
+    });
+  }
+
+  Future<void> deleteLesson(Lesson lesson) {
+    final lessonRef = _lessons.doc(lesson.id);
+    final studentRef = _students.doc(lesson.studentId);
+    return _db.runTransaction((tx) async {
+      final snap = await tx.get(studentRef);
+      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
+      tx.delete(lessonRef);
+      tx.update(studentRef, {
+        'balanceHours': current + lesson.durationHours,
+      });
+    });
+  }
+
+  Future<void> updateLessonReflection({
+    required String lessonId,
+    required String reflection,
+  }) {
+    final data = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    final trimmed = reflection.trim();
+    if (trimmed.isEmpty) {
+      data['studentReflection'] = FieldValue.delete();
+    } else {
+      data['studentReflection'] = trimmed;
+    }
+    return _lessons.doc(lessonId).update(data);
+  }
+
+  Future<String?> findStudentIdByEmail(String email) async {
+    final snapshot =
+        await _students.where('email', isEqualTo: email).limit(1).get();
+    if (snapshot.docs.isEmpty) return null;
+    return snapshot.docs.first.id;
+  }
+
+  // ==================== Cancellation Request Methods ====================
+
+  /// Create a new cancellation request
+  Future<String> createCancellationRequest(CancellationRequest request) async {
+    final doc = await _cancellationRequests.add(request.toMap());
+    return doc.id;
+  }
+
+  /// Stream cancellation requests for an instructor
+  Stream<List<CancellationRequest>> streamCancellationRequestsForInstructor(
+    String instructorId,
+  ) {
+    return _cancellationRequests
+        .where('instructorId', isEqualTo: instructorId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(CancellationRequest.fromDoc).toList());
+  }
+
+  /// Stream pending cancellation requests for an instructor
+  Stream<List<CancellationRequest>> streamPendingCancellationRequests(
+    String instructorId,
+  ) {
+    return _cancellationRequests
+        .where('instructorId', isEqualTo: instructorId)
+        .where('status', isEqualTo: 'pending')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(CancellationRequest.fromDoc).toList());
+  }
+
+  /// Stream cancellation requests for a student
+  Stream<List<CancellationRequest>> streamCancellationRequestsForStudent(
+    String studentId,
+  ) {
+    return _cancellationRequests
+        .where('studentId', isEqualTo: studentId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(CancellationRequest.fromDoc).toList());
+  }
+
+  /// Check if a cancellation request exists for a lesson
+  Future<CancellationRequest?> getCancellationRequestForLesson(
+    String lessonId,
+  ) async {
+    final snapshot = await _cancellationRequests
+        .where('lessonId', isEqualTo: lessonId)
+        .limit(1)
+        .get();
+    if (snapshot.docs.isEmpty) return null;
+    return CancellationRequest.fromDoc(snapshot.docs.first);
+  }
+
+  /// Approve a cancellation request
+  /// This updates the request status, cancels the lesson, and deducts hours
+  Future<void> approveCancellationRequest(CancellationRequest request) {
+    final requestRef = _cancellationRequests.doc(request.id);
+    final lessonRef = _lessons.doc(request.lessonId);
+    final studentRef = _students.doc(request.studentId);
+
+    return _db.runTransaction((tx) async {
+      final snap = await tx.get(studentRef);
+      final currentBalance = (snap.data()?['balanceHours'] ?? 0).toDouble();
+
+      // Update the cancellation request
+      tx.update(requestRef, {
+        'status': 'approved',
+        'respondedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update the lesson status to cancelled
+      tx.update(lessonRef, {
+        'status': 'cancelled',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Deduct hours from student balance (partial refund)
+      // If chargePercent is 50%, only 50% of hours are deducted (50% refunded)
+      final hoursToDeduct = request.hoursToDeduct * (request.chargePercent / 100);
+      tx.update(studentRef, {
+        'balanceHours': currentBalance - hoursToDeduct,
+      });
+
+      debugPrint(
+        '[approveCancellationRequest] Approved request ${request.id}, '
+        'deducted $hoursToDeduct hours (${request.chargePercent}% of ${request.hoursToDeduct})',
+      );
+    });
+  }
+
+  /// Decline a cancellation request
+  Future<void> declineCancellationRequest(String requestId) {
+    return _cancellationRequests.doc(requestId).update({
+      'status': 'declined',
+      'respondedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ==================== Instructor Settings Methods ====================
+
+  /// Update instructor cancellation policy
+  Future<void> updateCancellationPolicy({
+    required String instructorId,
+    required int windowHours,
+    required int chargePercent,
+  }) {
+    return _users.doc(instructorId).update({
+      'cancellationPolicy': {
+        'windowHours': windowHours,
+        'chargePercent': chargePercent,
+      },
+    });
+  }
+
+  /// Update instructor reminder hours
+  Future<void> updateReminderHours({
+    required String instructorId,
+    required int reminderHoursBefore,
+  }) {
+    return _users.doc(instructorId).update({
+      'reminderHoursBefore': reminderHoursBefore,
+    });
+  }
+
+  /// Update all instructor notification settings
+  Future<void> updateInstructorSettings({
+    required String instructorId,
+    int? windowHours,
+    int? chargePercent,
+    int? reminderHoursBefore,
+  }) {
+    final data = <String, dynamic>{};
+
+    if (windowHours != null || chargePercent != null) {
+      data['cancellationPolicy'] = {
+        if (windowHours != null) 'windowHours': windowHours,
+        if (chargePercent != null) 'chargePercent': chargePercent,
+      };
+    }
+
+    if (reminderHoursBefore != null) {
+      data['reminderHoursBefore'] = reminderHoursBefore;
+    }
+
+    if (data.isEmpty) return Future.value();
+    return _users.doc(instructorId).update(data);
+  }
+
+  /// Update lesson status
+  Future<void> updateLessonStatus({
+    required String lessonId,
+    required String status,
+  }) {
+    return _lessons.doc(lessonId).update({
+      'status': status,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Send instructor notification to student
+  /// Creates a document that triggers a Cloud Function to send the notification
+  Future<void> sendInstructorNotification({
+    required String instructorId,
+    required String studentId,
+    required String lessonId,
+    required String notificationType, // 'on_way' or 'arrived'
+  }) async {
+    try {
+      debugPrint('[Notification] Creating instructor notification document...');
+      debugPrint('[Notification] instructorId: $instructorId');
+      debugPrint('[Notification] studentId: $studentId');
+      debugPrint('[Notification] lessonId: $lessonId');
+      debugPrint('[Notification] notificationType: $notificationType');
+      
+      final docRef = await _instructorNotifications.add({
+        'instructorId': instructorId,
+        'studentId': studentId,
+        'lessonId': lessonId,
+        'notificationType': notificationType,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      
+      debugPrint('[Notification] Document created with ID: ${docRef.id}');
+      debugPrint('[Notification] Cloud Function should trigger automatically');
+    } catch (e) {
+      debugPrint('[Notification] Error creating notification document: $e');
+      rethrow;
+    }
+  }
+}

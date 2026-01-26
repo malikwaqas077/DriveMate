@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+.packages
+.pub-cache/
+.pub/
+
+# Build outputs
+build/
+dist/
+*.js.map
+functions/lib/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Flutter
+.flutter-plugins
+.flutter-plugins-dependencies
+.dart_tool/
+*.iml
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Generated files
+*.g.dart
+*.freezed.dart
