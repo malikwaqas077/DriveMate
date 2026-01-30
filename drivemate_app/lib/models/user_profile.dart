@@ -2,6 +2,73 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'cancellation_rule.dart';
 
+class CustomPaymentMethod {
+  CustomPaymentMethod({
+    required this.id,
+    required this.label,
+  });
+
+  final String id;
+  final String label;
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'label': label,
+    };
+  }
+
+  static CustomPaymentMethod fromMap(Map<String, dynamic> data) {
+    return CustomPaymentMethod(
+      id: (data['id'] ?? '') as String,
+      label: (data['label'] ?? '') as String,
+    );
+  }
+
+  CustomPaymentMethod copyWith({String? id, String? label}) {
+    return CustomPaymentMethod(
+      id: id ?? this.id,
+      label: label ?? this.label,
+    );
+  }
+}
+
+class CustomLessonType {
+  CustomLessonType({
+    required this.id,
+    required this.label,
+    this.color,
+  });
+
+  final String id;
+  final String label;
+  final int? color; // Color value as int (0xAARRGGBB)
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'label': label,
+      if (color != null) 'color': color,
+    };
+  }
+
+  static CustomLessonType fromMap(Map<String, dynamic> data) {
+    return CustomLessonType(
+      id: (data['id'] ?? '') as String,
+      label: (data['label'] ?? '') as String,
+      color: data['color'] as int?,
+    );
+  }
+
+  CustomLessonType copyWith({String? id, String? label, int? color}) {
+    return CustomLessonType(
+      id: id ?? this.id,
+      label: label ?? this.label,
+      color: color ?? this.color,
+    );
+  }
+}
+
 class CancellationPolicy {
   CancellationPolicy({
     required this.windowHours,
@@ -42,12 +109,20 @@ class InstructorSettings {
     this.reminderHoursBefore,
     this.notificationSettings,
     this.defaultNavigationApp,
+    this.lessonColors,
+    this.defaultCalendarView,
+    this.customPaymentMethods,
+    this.customLessonTypes,
   });
 
   final List<CancellationRule>? cancellationRules;
   final int? reminderHoursBefore;
   final Map<String, bool>? notificationSettings; // e.g., {'autoSendOnWay': true, 'autoSendArrived': false}
   final String? defaultNavigationApp; // 'google_maps', 'apple_maps', or null for system default
+  final Map<String, int>? lessonColors; // e.g., {'lesson': 0xFFFF9800, 'test': 0xFF2196F3, 'mock_test': 0xFF7B1FA2}
+  final String? defaultCalendarView; // 'grid' or 'list'
+  final List<CustomPaymentMethod>? customPaymentMethods;
+  final List<CustomLessonType>? customLessonTypes;
 
   Map<String, dynamic> toMap() {
     return {
@@ -56,6 +131,12 @@ class InstructorSettings {
       if (reminderHoursBefore != null) 'reminderHoursBefore': reminderHoursBefore,
       if (notificationSettings != null) 'notificationSettings': notificationSettings,
       if (defaultNavigationApp != null) 'defaultNavigationApp': defaultNavigationApp,
+      if (lessonColors != null) 'lessonColors': lessonColors,
+      if (defaultCalendarView != null) 'defaultCalendarView': defaultCalendarView,
+      if (customPaymentMethods != null)
+        'customPaymentMethods': customPaymentMethods!.map((m) => m.toMap()).toList(),
+      if (customLessonTypes != null)
+        'customLessonTypes': customLessonTypes!.map((t) => t.toMap()).toList(),
     };
   }
 
@@ -72,6 +153,20 @@ class InstructorSettings {
           ? Map<String, bool>.from(data['notificationSettings'] as Map)
           : null,
       defaultNavigationApp: data['defaultNavigationApp'] as String?,
+      lessonColors: data['lessonColors'] != null
+          ? Map<String, int>.from(data['lessonColors'] as Map)
+          : null,
+      defaultCalendarView: data['defaultCalendarView'] as String?,
+      customPaymentMethods: data['customPaymentMethods'] != null
+          ? (data['customPaymentMethods'] as List)
+              .map((m) => CustomPaymentMethod.fromMap(m as Map<String, dynamic>))
+              .toList()
+          : null,
+      customLessonTypes: data['customLessonTypes'] != null
+          ? (data['customLessonTypes'] as List)
+              .map((t) => CustomLessonType.fromMap(t as Map<String, dynamic>))
+              .toList()
+          : null,
     );
   }
 
@@ -80,12 +175,20 @@ class InstructorSettings {
     int? reminderHoursBefore,
     Map<String, bool>? notificationSettings,
     String? defaultNavigationApp,
+    Map<String, int>? lessonColors,
+    String? defaultCalendarView,
+    List<CustomPaymentMethod>? customPaymentMethods,
+    List<CustomLessonType>? customLessonTypes,
   }) {
     return InstructorSettings(
       cancellationRules: cancellationRules ?? this.cancellationRules,
       reminderHoursBefore: reminderHoursBefore ?? this.reminderHoursBefore,
       notificationSettings: notificationSettings ?? this.notificationSettings,
       defaultNavigationApp: defaultNavigationApp ?? this.defaultNavigationApp,
+      lessonColors: lessonColors ?? this.lessonColors,
+      defaultCalendarView: defaultCalendarView ?? this.defaultCalendarView,
+      customPaymentMethods: customPaymentMethods ?? this.customPaymentMethods,
+      customLessonTypes: customLessonTypes ?? this.customLessonTypes,
     );
   }
 }
@@ -96,6 +199,8 @@ class UserProfile {
     required this.role,
     required this.name,
     required this.email,
+    this.phone,
+    this.password, // Temporary password for student accounts (instructors only)
     this.schoolId,
     this.studentId,
     this.acceptedTermsVersion,
@@ -110,6 +215,8 @@ class UserProfile {
   final String role;
   final String name;
   final String email;
+  final String? phone;
+  final String? password; // Temporary password for student accounts (instructors only)
   final String? schoolId;
   final String? studentId;
   final int? acceptedTermsVersion;
@@ -124,6 +231,8 @@ class UserProfile {
       'role': role,
       'name': name,
       'email': email,
+      if (phone != null) 'phone': phone,
+      if (password != null) 'password': password, // Temporary password (instructors only)
       'schoolId': schoolId,
       'studentId': studentId,
       if (acceptedTermsVersion != null)
@@ -152,6 +261,8 @@ class UserProfile {
       role: (data['role'] ?? '') as String,
       name: (data['name'] ?? '') as String,
       email: (data['email'] ?? '') as String,
+      phone: data['phone'] as String?,
+      password: data['password'] as String?,
       schoolId: data['schoolId'] as String?,
       studentId: data['studentId'] as String?,
       acceptedTermsVersion: (data['acceptedTermsVersion'] as int?),

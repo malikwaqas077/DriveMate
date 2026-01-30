@@ -115,22 +115,21 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppTheme.neutral50,
       appBar: AppBar(
-        backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Edit Profile',
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w600,
-            color: AppTheme.neutral900,
+            color: colorScheme.onSurface,
           ),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.neutral700),
+          icon: Icon(Icons.arrow_back_rounded, color: colorScheme.onSurfaceVariant),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -238,12 +237,12 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
                         child: _saving
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 20,
                                 height: 20,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                                  valueColor: AlwaysStoppedAnimation(Theme.of(context).colorScheme.onPrimary),
                                 ),
                               )
                             : const Text('Save Profile'),
@@ -258,23 +257,25 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
   }
 
   Widget _buildSectionHeader(String title) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w600,
-        color: AppTheme.neutral900,
+        color: colorScheme.onSurface,
       ),
     );
   }
 
   Widget _buildSettingCard({required List<Widget> children}) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(children: children),
     );

@@ -12,7 +12,20 @@
           "package_name": "app.techsol.drivemate"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "98973897901-6iqncbbhv9o966npnu9uv5pjegljtvik.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "app.techsol.drivemate",
+            "certificate_hash": "c1fa02a901890d9596849f4f05d2fac57d95927b"
+          }
+        },
+        {
+          "client_id": "98973897901-poqc7mksroa76n5e96ol4cvkq9rljhdb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCQpYeZKWyyt9oXbPEZdYxLeyFIrd8R4FE"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "98973897901-poqc7mksroa76n5e96ol4cvkq9rljhdb.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "98973897901-rn0fdr5sfk6u9fvjq7j5t3m7lbojto4s.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "app.techsol.drivemate"
+              }
+            }
+          ]
         }
       }
     }

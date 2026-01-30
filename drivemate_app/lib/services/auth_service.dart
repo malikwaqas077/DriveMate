@@ -1,7 +1,13 @@
+import 'dart:convert';
+import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:crypto/crypto.dart';
 
 import '../firebase_options.dart';
+import 'fcm_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -9,6 +15,29 @@ class AuthService {
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
   User? get currentUser => _auth.currentUser;
+
+  /// Converts a phone number to an email format for Firebase Auth
+  /// Example: +1234567890 -> +1234567890@drivemate.local
+  static String phoneToEmail(String phone) {
+    // Normalize phone number (remove spaces, ensure it starts with +)
+    final normalizedPhone = phone.trim().replaceAll(RegExp(r'\s+'), '');
+    return '$normalizedPhone@drivemate.local';
+  }
+
+  /// Converts an email format back to phone number
+  /// Example: +1234567890@drivemate.local -> +1234567890
+  static String? emailToPhone(String email) {
+    if (email.endsWith('@drivemate.local')) {
+      return email.replaceAll('@drivemate.local', '');
+    }
+    return null;
+  }
+
+  /// Generates a random 6-digit password
+  static String generateRandomPassword() {
+    final random = Random();
+    return (100000 + random.nextInt(900000)).toString();
+  }
 
   Future<UserCredential> signIn({
     required String email,
@@ -18,6 +47,15 @@ class AuthService {
       email: email.trim(),
       password: password,
     );
+  }
+
+  /// Sign in with phone number (converts to email format internally)
+  Future<UserCredential> signInWithPhone({
+    required String phone,
+    required String password,
+  }) {
+    final email = phoneToEmail(phone);
+    return signIn(email: email, password: password);
   }
 
   Future<UserCredential> signUp({
@@ -31,9 +69,16 @@ class AuthService {
   }
 
   Future<UserCredential> createStudentLogin({
-    required String email,
+    String? email,
+    String? phone,
     required String password,
   }) async {
+    if (phone == null && email == null) {
+      throw ArgumentError('Either email or phone must be provided');
+    }
+    
+    final authEmail = phone != null ? phoneToEmail(phone) : email!.trim();
+    
     final secondaryApp = await Firebase.initializeApp(
       name: 'student-${DateTime.now().millisecondsSinceEpoch}',
       options: DefaultFirebaseOptions.currentPlatform,
@@ -41,7 +86,7 @@ class AuthService {
     final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
     try {
       return await secondaryAuth.createUserWithEmailAndPassword(
-        email: email.trim(),
+        email: authEmail,
         password: password,
       );
     } finally {
@@ -68,5 +113,77 @@ class AuthService {
     }
   }
 
-  Future<void> signOut() => _auth.signOut();
+  /// Sign in with Google. Returns [UserCredential] or throws.
+  /// User may cancel the flow (returns null from Google) — treat as cancelled, don't throw.
+  Future<UserCredential?> signInWithGoogle() async {
+    final webClientId = DefaultFirebaseOptions.googleSignInWebClientId;
+    final googleSignIn = GoogleSignIn(
+      serverClientId: webClientId?.isNotEmpty == true ? webClientId : null,
+    );
+    final googleUser = await googleSignIn.signIn();
+    if (googleUser == null) return null;
+    final googleAuth = await googleUser.authentication;
+    final idToken = googleAuth.idToken;
+    final accessToken = googleAuth.accessToken;
+    if (idToken == null) {
+      throw FirebaseAuthException(
+        code: 'google-id-token-null',
+        message: 'Google Sign-In did not return an ID token. Set DefaultFirebaseOptions.googleSignInWebClientId in lib/firebase_options.dart to your Web client ID from Firebase Console → Authentication → Sign-in method → Google → Web SDK configuration.',
+      );
+    }
+    final credential = GoogleAuthProvider.credential(
+      idToken: idToken,
+      accessToken: accessToken,
+    );
+    return _auth.signInWithCredential(credential);
+  }
+
+  /// Sign in with Apple. Returns [UserCredential] or null if user cancels.
+  /// Requires Sign in with Apple capability on iOS and Apple as provider in Firebase Console.
+  Future<UserCredential?> signInWithApple() async {
+    final rawNonce = _generateNonce();
+    final hashedNonce = _sha256ofString(rawNonce);
+    final appleCredential = await SignInWithApple.getAppleIDCredential(
+      scopes: [
+        AppleIDAuthorizationScopes.email,
+        AppleIDAuthorizationScopes.fullName,
+      ],
+      nonce: hashedNonce,
+    );
+    final idToken = appleCredential.identityToken;
+    if (idToken == null) {
+      throw FirebaseAuthException(
+        code: 'apple-id-token-null',
+        message: 'Apple Sign-In did not return an identity token.',
+      );
+    }
+    final credential = OAuthProvider('apple.com').credential(
+      idToken: idToken,
+      rawNonce: rawNonce,
+    );
+    return _auth.signInWithCredential(credential);
+  }
+
+  static String _generateNonce([int length = 32]) {
+    const charset =
+        '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
+    final random = Random.secure();
+    return List.generate(length, (_) => charset[random.nextInt(charset.length)]).join();
+  }
+
+  static String _sha256ofString(String input) {
+    final bytes = utf8.encode(input);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
+  }
+
+  /// Sign out and clear FCM token so this device no longer receives push notifications.
+  Future<void> signOut() async {
+    await GoogleSignIn().signOut();
+    final userId = _auth.currentUser?.uid;
+    if (userId != null) {
+      await FCMService.instance.clearToken(userId);
+    }
+    await _auth.signOut();
+  }
 }

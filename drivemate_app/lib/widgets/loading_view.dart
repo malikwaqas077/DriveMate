@@ -91,7 +91,7 @@ class _LoadingViewState extends State<LoadingView>
                 Text(
                   widget.message!,
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppTheme.neutral600,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w500,
                       ),
                   textAlign: TextAlign.center,

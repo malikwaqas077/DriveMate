@@ -24,7 +24,7 @@ class StudentsScreen extends StatefulWidget {
 class _StudentsScreenState extends State<StudentsScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final AuthService _authService = AuthService();
-  String _statusFilter = 'all';
+  String _statusFilter = 'active';
 
   static const List<String> _statusOptions = [
     'active',
@@ -76,45 +76,64 @@ class _StudentsScreenState extends State<StudentsScreen> {
     return StreamBuilder<List<Student>>(
       stream: _firestoreService.streamStudents(
         widget.instructor.id,
-        status: _statusFilter,
+        status: null, // Get all students for counts
       ),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const LoadingView(message: 'Loading students...');
-        }
-        final students = snapshot.data ?? [];
-        return Scaffold(
-          backgroundColor: AppTheme.neutral50,
-          body: Column(
-            children: [
-              _buildStatusFilters(),
-              Expanded(
-                child: students.isEmpty
-                    ? EmptyView(
-                        message: 'No students yet',
-                        subtitle: 'Add your first student to get started',
-                        type: EmptyViewType.students,
-                        actionLabel: 'Add Student',
-                        onAction: () => _showAddStudent(context),
-                      )
-                    : _buildStudentsList(students),
+      builder: (context, allStudentsSnapshot) {
+        // Get filtered students for display
+        return StreamBuilder<List<Student>>(
+          stream: _firestoreService.streamStudents(
+            widget.instructor.id,
+            status: _statusFilter,
+          ),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const LoadingView(message: 'Loading students...');
+            }
+            final students = snapshot.data ?? [];
+            final allStudents = allStudentsSnapshot.data ?? [];
+            
+            // Calculate counts for each status
+            final statusCounts = <String, int>{
+              'all': allStudents.length,
+              'active': allStudents.where((s) => s.status == 'active').length,
+              'inactive': allStudents.where((s) => s.status == 'inactive').length,
+              'passed': allStudents.where((s) => s.status == 'passed').length,
+            };
+            
+            return Scaffold(
+              body: Column(
+                children: [
+                  _buildStatusFilters(statusCounts),
+                  Expanded(
+                    child: students.isEmpty
+                        ? EmptyView(
+                            message: 'No students yet',
+                            subtitle: 'Add your first student to get started',
+                            type: EmptyViewType.students,
+                            actionLabel: 'Add Student',
+                            onAction: () => _showAddStudent(context),
+                          )
+                        : _buildStudentsList(students),
+                  ),
+                ],
               ),
-            ],
-          ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _showAddStudent(context),
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Add Student'),
-          ),
+              floatingActionButton: FloatingActionButton.extended(
+                onPressed: () => _showAddStudent(context),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add Student'),
+              ),
+            );
+          },
         );
       },
     );
   }
 
-  Widget _buildStatusFilters() {
+  Widget _buildStatusFilters(Map<String, int> statusCounts) {
+    final colorScheme = Theme.of(context).colorScheme;
     final chips = <String>['all', ..._statusOptions];
     return Container(
-      color: Colors.white,
+      color: colorScheme.surface,
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
         scrollDirection: Axis.horizontal,
@@ -122,10 +141,11 @@ class _StudentsScreenState extends State<StudentsScreen> {
           children: chips.map((status) {
             final selected = _statusFilter == status;
             final label = status[0].toUpperCase() + status.substring(1);
+            final count = statusCounts[status] ?? 0;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilterChip(
-                label: Text(label),
+                label: Text('$label ($count)'),
                 selected: selected,
                 onSelected: (_) {
                   setState(() => _statusFilter = status);
@@ -134,18 +154,18 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     ? Icon(
                         _getStatusIcon(status),
                         size: 18,
-                        color: selected ? AppTheme.primary : AppTheme.neutral500,
+                        color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                       )
                     : null,
                 showCheckmark: false,
-                backgroundColor: Colors.white,
-                selectedColor: AppTheme.primary.withOpacity(0.12),
+                backgroundColor: Theme.of(context).colorScheme.surface,
+                selectedColor: Theme.of(context).colorScheme.primary.withOpacity(0.15),
                 side: BorderSide(
-                  color: selected ? AppTheme.primary : AppTheme.neutral200,
+                  color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant,
                   width: 1,
                 ),
                 labelStyle: TextStyle(
-                  color: selected ? AppTheme.primary : AppTheme.neutral600,
+                  color: selected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -169,21 +189,22 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }
 
   Widget _buildStudentCard(Student student) {
+    final colorScheme = Theme.of(context).colorScheme;
     final balanceColor = student.balanceHours < 0
         ? AppTheme.error
         : student.balanceHours > 0
             ? AppTheme.success
-            : AppTheme.neutral500;
+            : colorScheme.onSurfaceVariant;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -199,6 +220,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
               builder: (_) => StudentDetailScreen(
                 studentId: student.id,
                 studentName: student.name,
+                instructorId: widget.instructor.id,
               ),
             ),
           ),
@@ -233,16 +255,19 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     children: [
                       Row(
                         children: [
-                          Expanded(
+                          Flexible(
                             child: Text(
                               student.name,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
-                                color: AppTheme.neutral900,
+                                color: colorScheme.onSurface,
                               ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
+                          const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -287,14 +312,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
                             Icon(
                               Icons.payments_outlined,
                               size: 14,
-                              color: AppTheme.neutral500,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                             const SizedBox(width: 4),
                             Text(
                               '£${student.hourlyRate!.toStringAsFixed(0)}/h',
                               style: TextStyle(
                                 fontSize: 13,
-                                color: AppTheme.neutral600,
+                                color: colorScheme.onSurfaceVariant,
                               ),
                             ),
                           ],
@@ -303,7 +328,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                             Icon(
                               Icons.phone_outlined,
                               size: 14,
-                              color: AppTheme.neutral500,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ],
                         ],
@@ -313,9 +338,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 ),
                 // Actions
                 PopupMenuButton<String>(
-                  icon: const Icon(
+                  icon: Icon(
                     Icons.more_vert_rounded,
-                    color: AppTheme.neutral500,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                   position: PopupMenuPosition.under,
                   shape: RoundedRectangleBorder(
@@ -333,7 +358,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                       value: 'edit',
                       child: Row(
                         children: [
-                          Icon(Icons.edit_outlined, size: 20, color: AppTheme.neutral600),
+                          Icon(Icons.edit_outlined, size: 20, color: colorScheme.onSurfaceVariant),
                           const SizedBox(width: 12),
                           const Text('Edit'),
                         ],
@@ -384,13 +409,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Container(
               height: MediaQuery.of(context).size.height * 0.9,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: Column(
                 children: [
@@ -399,7 +425,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     padding: const EdgeInsets.fromLTRB(24, 16, 16, 16),
                     decoration: BoxDecoration(
                       border: Border(
-                        bottom: BorderSide(color: AppTheme.neutral200),
+                        bottom: BorderSide(color: colorScheme.outlineVariant),
                       ),
                     ),
                     child: Row(
@@ -408,16 +434,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: AppTheme.primary.withOpacity(0.1),
+                            color: colorScheme.primary.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.person_add_outlined,
-                            color: AppTheme.primary,
+                            color: colorScheme.primary,
                           ),
                         ),
                         const SizedBox(width: 16),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -426,14 +452,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w600,
-                                  color: AppTheme.neutral900,
+                                  color: colorScheme.onSurface,
                                 ),
                               ),
                               Text(
                                 'Create a new student profile',
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: AppTheme.neutral500,
+                                  color: colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ],
@@ -489,24 +515,25 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           ),
                           const SizedBox(height: 16),
                           TextField(
-                            controller: emailController,
-                            decoration: const InputDecoration(
-                              labelText: 'Email *',
-                              prefixIcon: Icon(Icons.email_outlined),
-                              helperText: 'Required if creating student login',
+                            controller: phoneController,
+                            decoration: InputDecoration(
+                              labelText: createLogin ? 'Phone Number *' : 'Phone Number (optional)',
+                              prefixIcon: const Icon(Icons.phone_outlined),
+                              helperText: createLogin ? 'Required for student login' : null,
                             ),
-                            keyboardType: TextInputType.emailAddress,
+                            keyboardType: TextInputType.phone,
                           ),
                           const SizedBox(height: 24),
                           _buildFormLabel('Optional Information (can be added later)'),
                           const SizedBox(height: 12),
                           TextField(
-                            controller: phoneController,
+                            controller: emailController,
                             decoration: const InputDecoration(
-                              labelText: 'Phone Number (optional)',
-                              prefixIcon: Icon(Icons.phone_outlined),
+                              labelText: 'Email (optional)',
+                              prefixIcon: Icon(Icons.email_outlined),
+                              helperText: 'Student can add email later',
                             ),
-                            keyboardType: TextInputType.phone,
+                            keyboardType: TextInputType.emailAddress,
                           ),
                           const SizedBox(height: 16),
                           TextField(
@@ -590,7 +617,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: AppTheme.neutral50,
+                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(14),
                             ),
                             child: Column(
@@ -606,13 +633,29 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 ),
                                 if (createLogin) ...[
                                   const SizedBox(height: 12),
-                                  TextField(
-                                    controller: passwordController,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Temporary Password',
-                                      prefixIcon: Icon(Icons.lock_outline),
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.infoLight.withOpacity(0.3),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: AppTheme.info.withOpacity(0.3)),
                                     ),
-                                    obscureText: true,
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.info_outline_rounded, size: 18, color: AppTheme.info),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            'A 6-digit password will be automatically generated and shown after creating the student.',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: AppTheme.info,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ],
@@ -626,9 +669,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: colorScheme.surface,
                       border: Border(
-                        top: BorderSide(color: AppTheme.neutral200),
+                        top: BorderSide(color: colorScheme.outlineVariant),
                       ),
                     ),
                     child: Row(
@@ -662,7 +705,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                       setSaving: (val) => setDialogState(() => saving = val),
                                     ),
                             child: saving
-                                ? const LoadingIndicator(size: 20, color: Colors.white)
+                                ? LoadingIndicator(size: 20, color: colorScheme.onPrimary)
                                 : const Text('Save Student'),
                           ),
                         ),
@@ -681,10 +724,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
   Widget _buildFormLabel(String text) {
     return Text(
       text,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        color: AppTheme.neutral700,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
     );
   }
@@ -707,21 +750,31 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }) async {
     final name = nameController.text.trim();
     final email = emailController.text.trim();
-    final password = passwordController.text;
+    var phone = phoneController.text.trim().replaceAll(RegExp(r'\s+'), '');
+    
+    // Normalize phone number: ensure it starts with + if it doesn't already
+    if (phone.isNotEmpty && !phone.startsWith('+')) {
+      // If it starts with 0, replace with country code (assuming UK, but could be made configurable)
+      if (phone.startsWith('0')) {
+        phone = '+44${phone.substring(1)}';
+      } else {
+        // Otherwise, assume it's missing the + prefix
+        phone = '+$phone';
+      }
+    }
+    
     if (name.isEmpty) {
       _showSnack(context, 'Name is required.');
       return;
     }
     if (createLogin) {
-      if (email.isEmpty) {
-        _showSnack(context, 'Email is required to create student login.');
-        return;
-      }
-      if (password.isEmpty) {
-        _showSnack(context, 'Temporary password is required.');
+      if (phone.isEmpty) {
+        _showSnack(context, 'Phone number is required to create student login.');
         return;
       }
     }
+    // Auto-generate 6-digit password for student login
+    final password = createLogin ? AuthService.generateRandomPassword() : '';
     setSaving(true);
     final rateText = rateController.text.trim();
     final rate = rateText.isEmpty ? null : double.tryParse(rateText);
@@ -776,23 +829,29 @@ class _StudentsScreenState extends State<StudentsScreen> {
         _showSnack(context, 'Student added, but payment failed: $error');
       }
     }
-    String? loginEmail;
+    String? loginPhone;
     String? loginPassword;
     String? loginError;
     if (createLogin && studentId != null) {
       try {
-        final credential = await _authService.createStudentLogin(email: email, password: password);
+        final credential = await _authService.createStudentLogin(
+          phone: phone,
+          email: email.isEmpty ? null : email,
+          password: password,
+        );
         final user = credential.user;
         if (user != null) {
           final profile = UserProfile(
             id: user.uid,
             role: 'student',
             name: name,
-            email: email,
+            email: email.isEmpty ? AuthService.phoneToEmail(phone) : email,
+            phone: phone,
+            password: password, // Store password for instructor access
             studentId: studentId,
           );
           await _firestoreService.createUserProfile(profile);
-          loginEmail = email;
+          loginPhone = phone;
           loginPassword = password;
         }
       } catch (error) {
@@ -802,8 +861,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
     if (context.mounted) {
       Navigator.pop(context);
     }
-    if (context.mounted && loginEmail != null && loginPassword != null) {
-      _showLoginDetails(context, loginEmail, loginPassword);
+    if (context.mounted && loginPhone != null && loginPassword != null) {
+      _showLoginDetails(context, loginPhone, loginPassword);
     } else if (context.mounted && loginError != null) {
       _showSnack(context, 'Student added, but login failed: $loginError');
     }
@@ -823,13 +882,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Container(
               height: MediaQuery.of(context).size.height * 0.75,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: Column(
                 children: [
@@ -837,7 +897,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   Container(
                     padding: const EdgeInsets.fromLTRB(24, 16, 16, 16),
                     decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: AppTheme.neutral200)),
+                      border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
@@ -864,17 +924,17 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Edit Student',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w600,
-                                  color: AppTheme.neutral900,
+                                  color: colorScheme.onSurface,
                                 ),
                               ),
                               Text(
                                 student.name,
-                                style: const TextStyle(fontSize: 13, color: AppTheme.neutral500),
+                                style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -973,8 +1033,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border(top: BorderSide(color: AppTheme.neutral200)),
+                      color: colorScheme.surface,
+                      border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
@@ -1023,7 +1083,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                     }
                                   },
                             child: saving
-                                ? const LoadingIndicator(size: 20, color: Colors.white)
+                                ? LoadingIndicator(size: 20, color: colorScheme.onPrimary)
                                 : const Text('Save Changes'),
                           ),
                         ),
@@ -1095,11 +1155,12 @@ class _StudentsScreenState extends State<StudentsScreen> {
     );
   }
 
-  void _showLoginDetails(BuildContext context, String email, String password) {
-    final shareMessage = 'Your DriveMate login details:\nEmail: $email\nPassword: $password';
+  void _showLoginDetails(BuildContext context, String phone, String password) {
+    final shareMessage = 'Your DriveMate login details:\nPhone Number: $phone\nPassword: $password';
     showDialog<void>(
       context: context,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           title: Row(
@@ -1114,7 +1175,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 child: const Icon(Icons.check_circle_outline, color: AppTheme.success, size: 24),
               ),
               const SizedBox(width: 16),
-              const Expanded(child: Text('Login Created')),
+              Expanded(child: Text('Login Created', style: TextStyle(color: colorScheme.onSurface))),
             ],
           ),
           content: Column(
@@ -1124,7 +1185,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppTheme.neutral50,
+                  color: colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Column(
@@ -1132,26 +1193,31 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.email_outlined, size: 16, color: AppTheme.neutral500),
+                        Icon(Icons.phone_outlined, size: 16, color: colorScheme.onSurfaceVariant),
                         const SizedBox(width: 8),
-                        Text(email, style: const TextStyle(fontWeight: FontWeight.w500)),
+                        Expanded(
+                          child: Text(
+                            phone,
+                            style: TextStyle(fontWeight: FontWeight.w500, color: colorScheme.onSurface),
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        const Icon(Icons.lock_outline, size: 16, color: AppTheme.neutral500),
+                        Icon(Icons.lock_outline, size: 16, color: colorScheme.onSurfaceVariant),
                         const SizedBox(width: 8),
-                        Text(password, style: const TextStyle(fontWeight: FontWeight.w500)),
+                        Text(password, style: TextStyle(fontWeight: FontWeight.w500, color: colorScheme.onSurface)),
                       ],
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Share these details with the student so they can access their lessons.',
-                style: TextStyle(fontSize: 13, color: AppTheme.neutral600),
+                style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
               ),
             ],
           ),

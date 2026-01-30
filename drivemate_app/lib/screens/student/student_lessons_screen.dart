@@ -135,12 +135,13 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
   }
 
   Widget _buildSectionHeader(BuildContext context, String title) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w700,
-        color: AppTheme.neutral900,
+        color: colorScheme.onSurface,
       ),
     );
   }
@@ -248,9 +249,6 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                // Cancellation button
-                _buildCancellationButton(context, lesson),
               ],
             ),
           ),
@@ -386,6 +384,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
   }
 
   Widget _buildReflectionCard(BuildContext context, Lesson lesson) {
+    final colorScheme = Theme.of(context).colorScheme;
     final reflection = lesson.studentReflection?.trim();
     final timeRange = _formatLessonTimeRange(lesson);
     final hasReflection = reflection != null && reflection.isNotEmpty;
@@ -393,9 +392,9 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -422,17 +421,17 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                   children: [
                     Text(
                       DateFormat('EEEE, d MMMM').format(lesson.startAt),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.neutral900,
+                        color: colorScheme.onSurface,
                       ),
                     ),
                     Text(
                       timeRange,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: AppTheme.neutral500,
+                        color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -446,14 +445,14 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppTheme.neutral50,
+              color: colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
               hasReflection ? reflection : 'No reflection added yet. Tap to add your thoughts about this lesson.',
               style: TextStyle(
                 fontSize: 14,
-                color: hasReflection ? AppTheme.neutral700 : AppTheme.neutral500,
+                color: hasReflection ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
                 fontStyle: hasReflection ? FontStyle.normal : FontStyle.italic,
                 height: 1.5,
               ),
@@ -467,8 +466,8 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
               icon: Icon(hasReflection ? Icons.edit_rounded : Icons.add_rounded, size: 18),
               label: Text(hasReflection ? 'Edit Reflection' : 'Add Reflection'),
               style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primary.withOpacity(0.1),
-                foregroundColor: AppTheme.primary,
+                backgroundColor: colorScheme.primary.withOpacity(0.15),
+                foregroundColor: colorScheme.primary,
                 elevation: 0,
               ),
             ),
@@ -479,10 +478,11 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
   }
 
   Widget _buildLessonTypeBadge(String lessonType) {
-    final color = switch (lessonType) {
-      'mock_test' => const Color(0xFF8B5CF6),
-      'test' => AppTheme.info,
-      _ => AppTheme.secondary,
+    // Use darker text on light backgrounds for clear contrast (especially orange "Lesson" tag)
+    final textColor = switch (lessonType) {
+      'mock_test' => const Color(0xFF5B21B6), // dark purple on light purple
+      'test' => const Color(0xFF1D4ED8), // dark blue on infoLight
+      _ => AppTheme.secondaryDark, // dark orange on secondaryLight so "Lesson" is readable
     };
     final bgColor = switch (lessonType) {
       'mock_test' => const Color(0xFFEDE9FE),
@@ -506,26 +506,27 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: color,
+          color: textColor,
         ),
       ),
     );
   }
 
   Widget _buildLessonList(BuildContext context, List<Lesson> lessons, bool showReflection) {
+    final colorScheme = Theme.of(context).colorScheme;
     if (lessons.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.neutral200),
+          border: Border.all(color: colorScheme.outlineVariant),
         ),
         child: Center(
           child: Text(
             showReflection ? 'No more past lessons' : 'No more upcoming lessons',
-            style: const TextStyle(
-              color: AppTheme.neutral500,
+            style: TextStyle(
+              color: colorScheme.onSurfaceVariant,
               fontSize: 14,
             ),
           ),
@@ -535,15 +536,15 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: ListView.separated(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         itemCount: lessons.length,
-        separatorBuilder: (_, __) => Divider(height: 1, color: AppTheme.neutral200),
+        separatorBuilder: (_, __) => Divider(height: 1, color: colorScheme.outlineVariant),
         itemBuilder: (context, index) {
           final lesson = lessons[index];
           return _buildLessonListItem(context, lesson, showReflection);
@@ -553,6 +554,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
   }
 
   Widget _buildLessonListItem(BuildContext context, Lesson lesson, bool showReflection) {
+    final colorScheme = Theme.of(context).colorScheme;
     final timeRange = _formatLessonTimeRange(lesson);
     final reflection = lesson.studentReflection?.trim();
     final hasReflection = reflection != null && reflection.isNotEmpty;
@@ -562,9 +564,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: showReflection 
-            ? () => _showReflectionEditor(context, lesson) 
-            : (!hasPendingCancellation ? () => _showCancellationDialog(context, lesson) : null),
+        onTap: showReflection ? () => _showReflectionEditor(context, lesson) : null,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -574,7 +574,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: showReflection ? AppTheme.neutral100 : AppTheme.primary.withOpacity(0.1),
+                  color: showReflection ? colorScheme.surfaceContainerHighest : colorScheme.primary.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Column(
@@ -585,7 +585,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
-                        color: showReflection ? AppTheme.neutral700 : AppTheme.primary,
+                        color: showReflection ? colorScheme.onSurfaceVariant : colorScheme.primary,
                       ),
                     ),
                     Text(
@@ -593,7 +593,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
-                        color: showReflection ? AppTheme.neutral500 : AppTheme.primary,
+                        color: showReflection ? colorScheme.onSurfaceVariant : colorScheme.primary,
                       ),
                     ),
                   ],
@@ -610,10 +610,10 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                         Expanded(
                           child: Text(
                             DateFormat('EEEE').format(lesson.startAt),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
-                              color: AppTheme.neutral900,
+                              color: colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -626,28 +626,28 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                         Icon(
                           Icons.access_time_rounded,
                           size: 14,
-                          color: AppTheme.neutral500,
+                          color: colorScheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           timeRange,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
-                            color: AppTheme.neutral500,
+                            color: colorScheme.onSurfaceVariant,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Icon(
                           Icons.hourglass_bottom_rounded,
                           size: 14,
-                          color: AppTheme.neutral500,
+                          color: colorScheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           '${lesson.durationHours.toStringAsFixed(1)}h',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
-                            color: AppTheme.neutral500,
+                            color: colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -659,7 +659,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                           Icon(
                             hasReflection ? Icons.check_circle_outline : Icons.edit_note_outlined,
                             size: 14,
-                            color: hasReflection ? AppTheme.success : AppTheme.neutral400,
+                            color: hasReflection ? AppTheme.success : colorScheme.onSurfaceVariant,
                           ),
                           const SizedBox(width: 4),
                           Expanded(
@@ -667,7 +667,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                               hasReflection ? 'Reflection added' : 'Tap to add reflection',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: hasReflection ? AppTheme.success : AppTheme.neutral400,
+                                color: hasReflection ? AppTheme.success : colorScheme.onSurfaceVariant,
                                 fontStyle: hasReflection ? FontStyle.normal : FontStyle.italic,
                               ),
                             ),
@@ -701,15 +701,32 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                 ),
               ),
               if (showReflection)
-                const Icon(
+                Icon(
                   Icons.chevron_right_rounded,
-                  color: AppTheme.neutral400,
+                  color: colorScheme.onSurfaceVariant,
                 ),
-              if (!showReflection && !hasPendingCancellation)
-                const Icon(
-                  Icons.event_busy_rounded,
-                  color: AppTheme.neutral400,
-                  size: 20,
+              if (!showReflection)
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.more_vert_rounded, color: colorScheme.onSurfaceVariant, size: 22),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 0),
+                  onSelected: (value) {
+                    if (value == 'request_cancellation') {
+                      _showCancellationDialog(context, lesson);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem<String>(
+                      value: 'request_cancellation',
+                      child: Row(
+                        children: [
+                          Icon(Icons.event_busy_rounded, size: 20),
+                          SizedBox(width: 12),
+                          Text('Request cancellation'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
             ],
           ),
@@ -727,13 +744,14 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Container(
               height: MediaQuery.of(context).size.height * 0.7,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: Column(
                 children: [
@@ -741,7 +759,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                   Container(
                     padding: const EdgeInsets.fromLTRB(24, 16, 16, 16),
                     decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: AppTheme.neutral200)),
+                      border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
@@ -759,23 +777,23 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Lesson Reflection',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w600,
-                                  color: AppTheme.neutral900,
+                                  color: colorScheme.onSurface,
                                 ),
                               ),
                               Text(
                                 DateFormat('d MMMM yyyy').format(lesson.startAt),
-                                style: const TextStyle(fontSize: 13, color: AppTheme.neutral500),
+                                style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close_rounded),
+                          icon: Icon(Icons.close_rounded, color: colorScheme.onSurfaceVariant),
                           onPressed: () => Navigator.pop(context),
                         ),
                       ],
@@ -788,12 +806,12 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'What did you learn in this lesson?',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: AppTheme.neutral700,
+                              color: colorScheme.onSurface,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -801,7 +819,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                             'Record your thoughts, progress, and areas to improve.',
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.neutral500,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -813,9 +831,9 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                               textAlignVertical: TextAlignVertical.top,
                               decoration: InputDecoration(
                                 hintText: 'E.g., Practiced roundabouts today. Need to work on checking mirrors more frequently...',
-                                hintStyle: TextStyle(color: AppTheme.neutral400),
+                                hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                                 filled: true,
-                                fillColor: AppTheme.neutral50,
+                                fillColor: colorScheme.surfaceContainerHighest,
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(14),
                                   borderSide: BorderSide.none,
@@ -831,8 +849,8 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border(top: BorderSide(color: AppTheme.neutral200)),
+                      color: colorScheme.surface,
+                      border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
@@ -859,7 +877,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                                     }
                                   },
                             child: saving
-                                ? const LoadingIndicator(size: 20, color: Colors.white)
+                                ? LoadingIndicator(size: 20, color: colorScheme.onPrimary)
                                 : const Text('Save Reflection'),
                           ),
                         ),
@@ -921,58 +939,74 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final screenWidth = MediaQuery.of(context).size.width;
+            final isSmallScreen = screenWidth < 360;
+            final horizontalPadding = isSmallScreen ? 16.0 : 24.0;
+            final buttonSpacing = isSmallScreen ? 8.0 : 12.0;
+            
             return Container(
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(context).viewInsets.bottom,
               ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // Header
                   Container(
-                    padding: const EdgeInsets.fromLTRB(24, 20, 16, 16),
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPadding,
+                      20,
+                      isSmallScreen ? 8.0 : 16.0,
+                      16,
+                    ),
                     decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: AppTheme.neutral200)),
+                      border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
                         Container(
-                          width: 44,
-                          height: 44,
+                          width: isSmallScreen ? 40.0 : 44,
+                          height: isSmallScreen ? 40.0 : 44,
                           decoration: BoxDecoration(
                             color: AppTheme.warningLight,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: const Icon(Icons.event_busy_rounded, color: AppTheme.warning),
                         ),
-                        const SizedBox(width: 16),
+                        SizedBox(width: isSmallScreen ? 12.0 : 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Request Cancellation',
                                 style: TextStyle(
-                                  fontSize: 18,
+                                  fontSize: isSmallScreen ? 16.0 : 18,
                                   fontWeight: FontWeight.w600,
-                                  color: AppTheme.neutral900,
+                                  color: colorScheme.onSurface,
                                 ),
                               ),
                               Text(
                                 DateFormat('EEEE, d MMMM').format(lesson.startAt),
-                                style: const TextStyle(fontSize: 13, color: AppTheme.neutral500),
+                                style: TextStyle(
+                                  fontSize: isSmallScreen ? 12.0 : 13,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
                               ),
                             ],
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close_rounded),
+                          icon: Icon(Icons.close_rounded, color: colorScheme.onSurfaceVariant),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
                           onPressed: () => Navigator.pop(context),
                         ),
                       ],
@@ -980,13 +1014,13 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                   ),
                   // Content
                   Padding(
-                    padding: const EdgeInsets.all(24),
+                    padding: EdgeInsets.all(horizontalPadding),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // Charge info
                         Container(
-                          padding: const EdgeInsets.all(16),
+                          padding: EdgeInsets.all(isSmallScreen ? 12.0 : 16),
                           decoration: BoxDecoration(
                             color: isWithinWindow
                                 ? AppTheme.warningLight
@@ -999,11 +1033,12 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                                 isWithinWindow
                                     ? Icons.warning_amber_rounded
                                     : Icons.check_circle_outline,
+                                size: isSmallScreen ? 20.0 : 24,
                                 color: isWithinWindow
                                     ? AppTheme.warning
                                     : AppTheme.success,
                               ),
-                              const SizedBox(width: 12),
+                              SizedBox(width: isSmallScreen ? 10.0 : 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1013,7 +1048,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                                           ? 'Late Cancellation'
                                           : 'Free Cancellation',
                                       style: TextStyle(
-                                        fontSize: 14,
+                                        fontSize: isSmallScreen ? 13.0 : 14,
                                         fontWeight: FontWeight.w600,
                                         color: isWithinWindow
                                             ? AppTheme.warning
@@ -1028,10 +1063,10 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                                               ? 'No charges apply - lesson is more than $matchingRuleHours hours away'
                                               : 'No charges apply for this cancellation',
                                       style: TextStyle(
-                                        fontSize: 13,
+                                        fontSize: isSmallScreen ? 12.0 : 13,
                                         color: isWithinWindow
-                                            ? AppTheme.neutral700
-                                            : AppTheme.neutral600,
+                                            ? AppTheme.warning
+                                            : AppTheme.success,
                                       ),
                                     ),
                                   ],
@@ -1040,28 +1075,40 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 20),
+                        SizedBox(height: isSmallScreen ? 16.0 : 20),
                         // Reason input
-                        const Text(
+                        Text(
                           'Reason (optional)',
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: isSmallScreen ? 13.0 : 14,
                             fontWeight: FontWeight.w600,
-                            color: AppTheme.neutral700,
+                            color: colorScheme.onSurface,
                           ),
                         ),
                         const SizedBox(height: 8),
                         TextField(
                           controller: reasonController,
                           maxLines: 3,
+                          style: TextStyle(
+                            fontSize: isSmallScreen ? 14.0 : 16,
+                            color: colorScheme.onSurface,
+                          ),
                           decoration: InputDecoration(
                             hintText: 'Let your instructor know why you need to cancel...',
-                            hintStyle: TextStyle(color: AppTheme.neutral400),
+                            hintStyle: TextStyle(
+                              color: colorScheme.onSurfaceVariant,
+                              fontSize: isSmallScreen ? 14.0 : 16,
+                            ),
                             filled: true,
-                            fillColor: AppTheme.neutral50,
+                            fillColor: colorScheme.surfaceContainerHighest,
+                            contentPadding: EdgeInsets.all(isSmallScreen ? 12.0 : 16),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide.none,
+                              borderSide: BorderSide(color: colorScheme.outlineVariant),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide(color: colorScheme.outlineVariant),
                             ),
                           ),
                         ),
@@ -1070,76 +1117,158 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
                   ),
                   // Footer
                   Container(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPadding,
+                      16,
+                      horizontalPadding,
+                      isSmallScreen ? 20.0 : 24,
+                    ),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border(top: BorderSide(color: AppTheme.neutral200)),
+                      color: colorScheme.surface,
+                      border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
                     ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: submitting ? null : () => Navigator.pop(context),
-                            child: const Text('Keep Lesson'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: FilledButton(
-                            onPressed: submitting
-                                ? null
-                                : () async {
-                                    setDialogState(() => submitting = true);
-                                    try {
-                                      final request = CancellationRequest(
-                                        id: '',
-                                        lessonId: lesson.id,
-                                        studentId: lesson.studentId,
-                                        instructorId: lesson.instructorId,
-                                        schoolId: lesson.schoolId,
-                                        status: 'pending',
-                                        reason: reasonController.text.trim().isEmpty
-                                            ? null
-                                            : reasonController.text.trim(),
-                                        chargePercent: effectiveCharge,
-                                        hoursToDeduct: lesson.durationHours,
-                                        createdAt: DateTime.now(),
-                                        lessonStartAt: lesson.startAt,
-                                      );
-                                      await _firestoreService.createCancellationRequest(request);
-                                      if (context.mounted) {
-                                        Navigator.pop(context, true);
-                                      }
-                                    } catch (e) {
-                                      setDialogState(() => submitting = false);
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text('Error: $e'),
-                                            backgroundColor: AppTheme.error,
+                    child: isSmallScreen
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton(
+                                  onPressed: submitting
+                                      ? null
+                                      : () async {
+                                          setDialogState(() => submitting = true);
+                                          try {
+                                            final request = CancellationRequest(
+                                              id: '',
+                                              lessonId: lesson.id,
+                                              studentId: lesson.studentId,
+                                              instructorId: lesson.instructorId,
+                                              schoolId: lesson.schoolId,
+                                              status: 'pending',
+                                              reason: reasonController.text.trim().isEmpty
+                                                  ? null
+                                                  : reasonController.text.trim(),
+                                              chargePercent: effectiveCharge,
+                                              hoursToDeduct: lesson.durationHours,
+                                              createdAt: DateTime.now(),
+                                              lessonStartAt: lesson.startAt,
+                                            );
+                                            await _firestoreService.createCancellationRequest(request);
+                                            if (context.mounted) {
+                                              Navigator.pop(context, true);
+                                            }
+                                          } catch (e) {
+                                            setDialogState(() => submitting = false);
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text('Error: $e'),
+                                                  backgroundColor: AppTheme.error,
+                                                ),
+                                              );
+                                            }
+                                          }
+                                        },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.warning,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    alignment: Alignment.center,
+                                  ),
+                                  child: submitting
+                                      ? SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation(colorScheme.onPrimary),
                                           ),
-                                        );
-                                      }
-                                    }
-                                  },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppTheme.warning,
-                            ),
-                            child: submitting
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation(Colors.white),
-                                    ),
-                                  )
-                                : const Text('Request Cancellation'),
+                                        )
+                                      : const Center(child: Text('Request Cancellation')),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton(
+                                  onPressed: submitting ? null : () => Navigator.pop(context),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                  ),
+                                  child: const Text('Keep Lesson'),
+                                ),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: submitting ? null : () => Navigator.pop(context),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                  ),
+                                  child: const Text('Keep Lesson'),
+                                ),
+                              ),
+                              SizedBox(width: buttonSpacing),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: submitting
+                                      ? null
+                                      : () async {
+                                          setDialogState(() => submitting = true);
+                                          try {
+                                            final request = CancellationRequest(
+                                              id: '',
+                                              lessonId: lesson.id,
+                                              studentId: lesson.studentId,
+                                              instructorId: lesson.instructorId,
+                                              schoolId: lesson.schoolId,
+                                              status: 'pending',
+                                              reason: reasonController.text.trim().isEmpty
+                                                  ? null
+                                                  : reasonController.text.trim(),
+                                              chargePercent: effectiveCharge,
+                                              hoursToDeduct: lesson.durationHours,
+                                              createdAt: DateTime.now(),
+                                              lessonStartAt: lesson.startAt,
+                                            );
+                                            await _firestoreService.createCancellationRequest(request);
+                                            if (context.mounted) {
+                                              Navigator.pop(context, true);
+                                            }
+                                          } catch (e) {
+                                            setDialogState(() => submitting = false);
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text('Error: $e'),
+                                                  backgroundColor: AppTheme.error,
+                                                ),
+                                              );
+                                            }
+                                          }
+                                        },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppTheme.warning,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    alignment: Alignment.center,
+                                  ),
+                                  child: submitting
+                                      ? SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation(colorScheme.onPrimary),
+                                          ),
+                                        )
+                                      : const Center(child: Text('Request Cancellation')),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
-                    ),
                   ),
                 ],
               ),

@@ -74,6 +74,31 @@ class FirestoreService {
     });
   }
 
+  /// Check if an owner is also an instructor in their school
+  Future<bool> isOwnerAlsoInstructor({
+    required String ownerId,
+    required String schoolId,
+  }) async {
+    final snapshot = await _schoolInstructors
+        .where('schoolId', isEqualTo: schoolId)
+        .where('instructorId', isEqualTo: ownerId)
+        .where('active', isEqualTo: true)
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
+  }
+
+  /// Check if an instructor owns their school
+  Future<bool> doesInstructorOwnSchool({
+    required String instructorId,
+    required String schoolId,
+  }) async {
+    final schoolDoc = await _schools.doc(schoolId).get();
+    if (!schoolDoc.exists) return false;
+    final data = schoolDoc.data();
+    return data?['ownerId'] == instructorId;
+  }
+
   Stream<List<AccessRequest>> streamAccessRequestsForInstructor(
     String instructorId,
   ) {
@@ -167,13 +192,15 @@ class FirestoreService {
 
   Future<String> ensurePersonalSchool({
     required UserProfile instructor,
+    String? schoolName,
   }) async {
     if (instructor.schoolId != null && instructor.schoolId!.isNotEmpty) {
       return instructor.schoolId!;
     }
+    final finalSchoolName = schoolName ?? '${instructor.name} School';
     final schoolId = await createSchool(
       ownerId: instructor.id,
-      name: '${instructor.name} School',
+      name: finalSchoolName,
     );
     await _schoolInstructors.add({
       'schoolId': schoolId,
@@ -306,6 +333,15 @@ class FirestoreService {
       payments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return payments;
     });
+  }
+
+  /// Payments for a school (payments with schoolId set). Use for school-wide reports.
+  Stream<List<Payment>> streamPaymentsForSchool(String schoolId) {
+    return _payments
+        .where('schoolId', isEqualTo: schoolId)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(Payment.fromDoc).toList());
   }
 
   Future<Student?> getStudentById(String studentId) async {
@@ -455,6 +491,13 @@ class FirestoreService {
   Future<String?> findStudentIdByEmail(String email) async {
     final snapshot =
         await _students.where('email', isEqualTo: email).limit(1).get();
+    if (snapshot.docs.isEmpty) return null;
+    return snapshot.docs.first.id;
+  }
+
+  Future<String?> findStudentIdByPhone(String phone) async {
+    final snapshot =
+        await _students.where('phone', isEqualTo: phone).limit(1).get();
     if (snapshot.docs.isEmpty) return null;
     return snapshot.docs.first.id;
   }

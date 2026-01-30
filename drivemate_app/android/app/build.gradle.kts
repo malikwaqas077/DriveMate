@@ -10,10 +10,13 @@ android {
     namespace = "app.techsol.drivemate"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+    // Pin build-tools to avoid aapt "Invalid file" / AndroidManifest.xml not found on some setups
+    buildToolsVersion = "34.0.0"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -41,4 +44,10 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    // Ensure Kotlin stdlib is bundled (Firebase KTX depends on it; fixes ClassNotFoundException: kotlin.collections.CollectionsKt)
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
 }

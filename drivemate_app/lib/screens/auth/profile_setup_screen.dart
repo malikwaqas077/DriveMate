@@ -68,8 +68,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppTheme.neutral50,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -99,12 +99,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 ),
               ),
               const SizedBox(height: 28),
-              const Text(
+              Text(
                 'Complete Your Profile',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.neutral900,
+                  color: colorScheme.onSurface,
                   letterSpacing: -0.5,
                 ),
               ),
@@ -113,7 +113,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 'Set up your driving school to get started with DriveMate.',
                 style: TextStyle(
                   fontSize: 15,
-                  color: AppTheme.neutral600,
+                  color: colorScheme.onSurfaceVariant,
                   height: 1.5,
                 ),
               ),
@@ -122,12 +122,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: colorScheme.surface,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppTheme.neutral200),
+                  border: Border.all(color: colorScheme.outlineVariant),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.03),
+                      color: colorScheme.shadow.withOpacity(0.08),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -185,14 +185,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: AppTheme.neutral50,
+                        color: colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
                         children: [
                           Icon(
                             Icons.email_outlined,
-                            color: AppTheme.neutral500,
+                            color: colorScheme.onSurfaceVariant,
                             size: 20,
                           ),
                           const SizedBox(width: 12),
@@ -200,7 +200,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                             child: Text(
                               widget.email,
                               style: TextStyle(
-                                color: AppTheme.neutral600,
+                                color: colorScheme.onSurfaceVariant,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -283,7 +283,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 child: FilledButton(
                   onPressed: _saving ? null : _saveProfile,
                   child: _saving
-                      ? const LoadingIndicator(size: 22, color: Colors.white)
+                      ? LoadingIndicator(size: 22, color: colorScheme.onPrimary)
                       : const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [

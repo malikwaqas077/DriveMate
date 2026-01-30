@@ -3,12 +3,18 @@ import 'package:flutter/material.dart';
 import '../../models/cancellation_request.dart';
 import '../../models/user_profile.dart';
 import '../../services/auth_service.dart';
+import '../../services/chat_service.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../chat/conversations_list_screen.dart';
+import '../owner/owner_access_requests_screen.dart';
+import '../owner/owner_instructor_choice_screen.dart';
+import '../owner/owner_instructors_screen.dart';
+import '../owner/owner_reports_screen.dart';
 import 'access_requests_screen.dart';
 import 'calendar_screen.dart';
 import 'cancellation_requests_screen.dart';
-import 'instructor_settings_screen.dart';
+import 'settings/settings_main_screen.dart';
 import 'payments_screen.dart';
 import 'reports_screen.dart';
 import 'students_screen.dart';
@@ -26,8 +32,10 @@ class InstructorHome extends StatefulWidget {
 class _InstructorHomeState extends State<InstructorHome> {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
+  final ChatService _chatService = ChatService();
   int _currentIndex = 0;
   int _pendingCancellations = 0;
+  bool _isOwner = false;
 
   late final List<Widget> _screens;
   late final List<_NavItem> _navItems;
@@ -64,6 +72,26 @@ class _InstructorHomeState extends State<InstructorHome> {
       ),
     ];
     _listenToPendingCancellations();
+    _checkIfOwner();
+  }
+
+  Future<void> _checkIfOwner() async {
+    final schoolId = widget.profile.schoolId;
+    if (schoolId != null && schoolId.isNotEmpty) {
+      // Check if instructor owns the school OR if owner is also instructor
+      final ownsSchool = await _firestoreService.doesInstructorOwnSchool(
+        instructorId: widget.profile.id,
+        schoolId: schoolId,
+      );
+      final isOwnerAlsoInstructor = widget.profile.role == 'owner' &&
+          await _firestoreService.isOwnerAlsoInstructor(
+            ownerId: widget.profile.id,
+            schoolId: schoolId,
+          );
+      if (mounted) {
+        setState(() => _isOwner = ownsSchool || isOwnerAlsoInstructor);
+      }
+    }
   }
 
   void _listenToPendingCancellations() {
@@ -85,7 +113,6 @@ class _InstructorHomeState extends State<InstructorHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.neutral50,
       appBar: _buildAppBar(context),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 200),
@@ -96,8 +123,9 @@ class _InstructorHomeState extends State<InstructorHome> {
   }
 
   PreferredSizeWidget _buildAppBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return AppBar(
-      backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       title: Row(
@@ -119,12 +147,12 @@ class _InstructorHomeState extends State<InstructorHome> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'DriveMate',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.neutral900,
+                  color: colorScheme.onSurface,
                   letterSpacing: -0.5,
                 ),
               ),
@@ -133,7 +161,7 @@ class _InstructorHomeState extends State<InstructorHome> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
-                  color: AppTheme.neutral500,
+                  color: colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -141,13 +169,69 @@ class _InstructorHomeState extends State<InstructorHome> {
         ],
       ),
       actions: [
+        // Chat button with unread badge
+        StreamBuilder<int>(
+          stream: _chatService.streamTotalUnreadCount(
+            widget.profile.id,
+            'instructor',
+          ),
+          builder: (context, snapshot) {
+            final unreadCount = snapshot.data ?? 0;
+            return Stack(
+              children: [
+                IconButton(
+                  icon: Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ConversationsListScreen(
+                          profile: widget.profile,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                if (unreadCount > 0)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: AppTheme.error,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Center(
+                        child: Text(
+                          unreadCount > 9 ? '9+' : '$unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
         // Cancellation requests button
         IconButton(
           icon: Stack(
             children: [
-              const Icon(
+              Icon(
                 Icons.event_busy_rounded,
-                color: AppTheme.neutral700,
+                color: colorScheme.onSurfaceVariant,
               ),
               if (_pendingCancellations > 0)
                 Positioned(
@@ -190,7 +274,7 @@ class _InstructorHomeState extends State<InstructorHome> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: AppTheme.neutral100,
+              color: colorScheme.surfaceContainerHighest,
               shape: BoxShape.circle,
             ),
             child: Center(
@@ -210,25 +294,52 @@ class _InstructorHomeState extends State<InstructorHome> {
           ),
           offset: const Offset(0, 8),
           itemBuilder: (context) => [
-            _buildPopupHeader(),
+            _buildPopupHeader(context),
             const PopupMenuDivider(),
+            if (_isOwner) _buildViewSwitcherMenuItem(context),
+            if (_isOwner) const PopupMenuDivider(),
             _buildPopupItem(
+              context,
               icon: Icons.settings_outlined,
               label: 'Settings',
               value: 'settings',
             ),
             _buildPopupItem(
+              context,
               icon: Icons.notifications_outlined,
               label: 'Access requests',
               value: 'access',
             ),
+            // Owner-only menu items
+            if (_isOwner) ...[
+              _buildPopupItem(
+                context,
+                icon: Icons.people_outlined,
+                label: 'Manage Instructors',
+                value: 'instructors',
+              ),
+              _buildPopupItem(
+                context,
+                icon: Icons.lock_open_outlined,
+                label: 'School Access Requests',
+                value: 'school_access',
+              ),
+              _buildPopupItem(
+                context,
+                icon: Icons.bar_chart_outlined,
+                label: 'School Reports',
+                value: 'school_reports',
+              ),
+            ],
             _buildPopupItem(
+              context,
               icon: Icons.description_outlined,
               label: 'Terms & Conditions',
               value: 'terms',
             ),
             const PopupMenuDivider(),
             _buildPopupItem(
+              context,
               icon: Icons.logout_rounded,
               label: 'Log out',
               value: 'logout',
@@ -239,7 +350,7 @@ class _InstructorHomeState extends State<InstructorHome> {
             if (value == 'settings') {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => InstructorSettingsScreen(
+                  builder: (_) => SettingsMainScreen(
                     instructor: widget.profile,
                   ),
                 ),
@@ -250,6 +361,33 @@ class _InstructorHomeState extends State<InstructorHome> {
                 MaterialPageRoute(
                   builder: (_) => AccessRequestsScreen(
                     instructor: widget.profile,
+                  ),
+                ),
+              );
+            }
+            if (value == 'instructors' && _isOwner) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => OwnerInstructorsScreen(
+                    owner: widget.profile,
+                  ),
+                ),
+              );
+            }
+            if (value == 'school_access' && _isOwner) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => OwnerAccessRequestsScreen(
+                    owner: widget.profile,
+                  ),
+                ),
+              );
+            }
+            if (value == 'school_reports' && _isOwner) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => OwnerReportsScreen(
+                    owner: widget.profile,
                   ),
                 ),
               );
@@ -278,7 +416,7 @@ class _InstructorHomeState extends State<InstructorHome> {
                 MaterialPageRoute(
                   builder: (_) => TermsScreen(
                     schoolId: schoolId,
-                    canEdit: false,
+                    canEdit: _isOwner, // Allow editing if owner
                   ),
                 ),
               );
@@ -293,7 +431,41 @@ class _InstructorHomeState extends State<InstructorHome> {
     );
   }
 
-  PopupMenuItem<String> _buildPopupHeader() {
+  PopupMenuItem<String> _buildViewSwitcherMenuItem(BuildContext context) {
+    return PopupMenuItem<String>(
+      enabled: false,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: SegmentedButton<String>(
+        style: ButtonStyle(
+          padding: WidgetStateProperty.all(
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+          visualDensity: VisualDensity.compact,
+        ),
+        segments: const [
+          ButtonSegment<String>(
+            value: 'instructor',
+            label: Text('Instructor'),
+            icon: Icon(Icons.school_rounded, size: 18),
+          ),
+          ButtonSegment<String>(
+            value: 'owner',
+            label: Text('Owner'),
+            icon: Icon(Icons.business_rounded, size: 18),
+          ),
+        ],
+        selected: const {'instructor'},
+        onSelectionChanged: (Set<String> selection) {
+          if (selection.contains('owner')) {
+            OwnerInstructorChoiceScreen.openAsOwner(context, widget.profile);
+          }
+        },
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _buildPopupHeader(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return PopupMenuItem<String>(
       enabled: false,
       child: Column(
@@ -301,9 +473,9 @@ class _InstructorHomeState extends State<InstructorHome> {
         children: [
           Text(
             widget.profile.name,
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w600,
-              color: AppTheme.neutral900,
+              color: colorScheme.onSurface,
               fontSize: 15,
             ),
           ),
@@ -311,7 +483,7 @@ class _InstructorHomeState extends State<InstructorHome> {
           Text(
             widget.profile.email,
             style: TextStyle(
-              color: AppTheme.neutral500,
+              color: colorScheme.onSurfaceVariant,
               fontSize: 13,
             ),
           ),
@@ -320,12 +492,14 @@ class _InstructorHomeState extends State<InstructorHome> {
     );
   }
 
-  PopupMenuItem<String> _buildPopupItem({
+  PopupMenuItem<String> _buildPopupItem(
+    BuildContext context, {
     required IconData icon,
     required String label,
     required String value,
     bool isDestructive = false,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return PopupMenuItem<String>(
       value: value,
       child: Row(
@@ -333,13 +507,13 @@ class _InstructorHomeState extends State<InstructorHome> {
           Icon(
             icon,
             size: 20,
-            color: isDestructive ? AppTheme.error : AppTheme.neutral600,
+            color: isDestructive ? AppTheme.error : colorScheme.onSurfaceVariant,
           ),
           const SizedBox(width: 12),
           Text(
             label,
             style: TextStyle(
-              color: isDestructive ? AppTheme.error : AppTheme.neutral700,
+              color: isDestructive ? AppTheme.error : colorScheme.onSurface,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -349,12 +523,13 @@ class _InstructorHomeState extends State<InstructorHome> {
   }
 
   Widget _buildBottomNav(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: colorScheme.shadow.withOpacity(0.08),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -383,6 +558,8 @@ class _InstructorHomeState extends State<InstructorHome> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final primary = colorScheme.primary;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -390,7 +567,7 @@ class _InstructorHomeState extends State<InstructorHome> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary.withOpacity(0.1) : Colors.transparent,
+          color: isSelected ? primary.withOpacity(0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
@@ -398,7 +575,7 @@ class _InstructorHomeState extends State<InstructorHome> {
           children: [
             Icon(
               isSelected ? item.activeIcon : item.icon,
-              color: isSelected ? AppTheme.primary : AppTheme.neutral500,
+              color: isSelected ? primary : colorScheme.onSurfaceVariant,
               size: 22,
             ),
             AnimatedSize(
@@ -408,10 +585,10 @@ class _InstructorHomeState extends State<InstructorHome> {
                       padding: const EdgeInsets.only(left: 8),
                       child: Text(
                         item.label,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.primary,
+                          color: primary,
                         ),
                       ),
                     )
@@ -460,9 +637,9 @@ class _InstructorHomeState extends State<InstructorHome> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              _authService.signOut();
+              await _authService.signOut();
             },
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.error,

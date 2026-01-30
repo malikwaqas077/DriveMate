@@ -35,6 +35,11 @@ class DefaultFirebaseOptions {
     }
   }
 
+  /// Web client ID for Google Sign-In on Android (serverClientId).
+  /// Get it from: Firebase Console → Authentication → Sign-in method → Google → Web SDK configuration → Web client ID.
+  /// Leave null if you don't use Google Sign-In on Android.
+  static const String? googleSignInWebClientId = null; // e.g. '98973897901-xxxx.apps.googleusercontent.com'
+
   static const FirebaseOptions web = FirebaseOptions(
     apiKey: 'AIzaSyAIvn_EVuZ6t8uyPwk9lBdfQCqZeMIseio',
     appId: '1:98973897901:web:51fb5a776a457544c1a224',

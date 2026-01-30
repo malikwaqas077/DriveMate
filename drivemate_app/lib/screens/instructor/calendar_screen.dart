@@ -25,9 +25,9 @@ class CalendarScreen extends StatefulWidget {
 class _CalendarScreenState extends State<CalendarScreen> {
   final FirestoreService _firestoreService = FirestoreService();
 
-  static const int _startHour = 0;
+  static const int _defaultStartHour = 6; // Default start hour (06:00)
   static const int _endHour = 24;
-  static const int _defaultScrollHour = 6;
+  static const int _defaultScrollHour = 6; // Default scroll to 06:00
   static const double _hourHeight = 70;
   static const double _timeColumnWidth = 40;
   static const double _compactBreakpoint = 380;
@@ -35,12 +35,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
   bool _didAutoScroll = false;
-  bool _showList = false;
   late final ScrollController _verticalController;
   late final ScrollController _headerScrollController;
   late final ScrollController _gridScrollController;
   bool _syncingScroll = false;
-  Timer? _nowTicker;
 
   @override
   void initState() {
@@ -65,16 +63,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
       }
       _syncingScroll = false;
     });
-    _nowTicker = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) {
-        setState(() {});
-      }
-    });
   }
 
   @override
   void dispose() {
-    _nowTicker?.cancel();
     _verticalController.dispose();
     _headerScrollController.dispose();
     _gridScrollController.dispose();
@@ -83,73 +75,107 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<Student>>(
-      stream: _firestoreService.streamStudents(widget.instructor.id),
-      builder: (context, studentsSnapshot) {
-        if (studentsSnapshot.connectionState == ConnectionState.waiting) {
-          return const LoadingView(message: 'Loading calendar...');
-        }
-        final students = studentsSnapshot.data ?? [];
-        final studentMap = {
-          for (final student in students) student.id: student.name,
-        };
-        return StreamBuilder<List<Lesson>>(
-          stream:
-              _firestoreService.streamLessonsForInstructor(widget.instructor.id),
-          builder: (context, lessonSnapshot) {
-            if (lessonSnapshot.connectionState == ConnectionState.waiting) {
-              return const LoadingView(message: 'Loading lessons...');
+    return StreamBuilder<UserProfile?>(
+      stream: _firestoreService.streamUserProfile(widget.instructor.id),
+      builder: (context, instructorSnapshot) {
+        final instructor = instructorSnapshot.data ?? widget.instructor;
+        
+        return StreamBuilder<List<Student>>(
+          stream: _firestoreService.streamStudents(instructor.id),
+          builder: (context, studentsSnapshot) {
+            if (studentsSnapshot.connectionState == ConnectionState.waiting) {
+              return const LoadingView(message: 'Loading calendar...');
             }
-            final lessons = lessonSnapshot.data ?? [];
-            return StreamBuilder<List<Payment>>(
-              stream: _firestoreService
-                  .streamPaymentsForInstructor(widget.instructor.id),
-              builder: (context, paymentsSnapshot) {
-                if (paymentsSnapshot.connectionState ==
-                    ConnectionState.waiting) {
-                  return const LoadingView(message: 'Loading payments...');
+            final students = studentsSnapshot.data ?? [];
+            final studentMap = {
+              for (final student in students) student.id: student.name,
+            };
+            return StreamBuilder<List<Lesson>>(
+              stream:
+                  _firestoreService.streamLessonsForInstructor(instructor.id),
+              builder: (context, lessonSnapshot) {
+                if (lessonSnapshot.connectionState == ConnectionState.waiting) {
+                  return const LoadingView(message: 'Loading lessons...');
                 }
-                final payments = paymentsSnapshot.data ?? [];
-                final lessonStatuses =
-                    _computeLessonStatuses(lessons, payments);
+                final lessons = lessonSnapshot.data ?? [];
+                return StreamBuilder<List<Payment>>(
+                  stream: _firestoreService
+                      .streamPaymentsForInstructor(instructor.id),
+                  builder: (context, paymentsSnapshot) {
+                    if (paymentsSnapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      return const LoadingView(message: 'Loading payments...');
+                    }
+                    final payments = paymentsSnapshot.data ?? [];
+                    final lessonStatuses =
+                        _computeLessonStatuses(lessons, payments);
                 final selectedDay = _selectedDay ?? DateTime.now();
                 final weekDays = _buildWeekDays(_focusedDay);
+                // Get default view from settings
+                final defaultView = instructor.instructorSettings?.defaultCalendarView ?? 'grid';
+                final showList = defaultView == 'list';
                 return Scaffold(
                   body: Column(
                     children: [
-                      _buildViewToggle(context),
                       _buildWeekHeader(context, weekDays, selectedDay),
                       Expanded(
-                        child: _showList
-                            ? _buildLessonList(
-                                lessons,
-                                weekDays,
-                                students,
-                                studentMap,
-                                lessonStatuses,
-                              )
-                            : _buildWeekGrid(
-                                context,
-                                weekDays,
-                                lessons,
-                                students,
-                                studentMap,
-                                selectedDay,
-                                lessonStatuses,
-                              ),
+                        child: GestureDetector(
+                          onHorizontalDragEnd: (details) {
+                            // Swipe right (positive velocity) = previous week
+                            // Swipe left (negative velocity) = next week
+                            const swipeThreshold = 100.0;
+                            if (details.primaryVelocity != null) {
+                              if (details.primaryVelocity! > swipeThreshold) {
+                                // Swipe right - go to previous week
+                                setState(() {
+                                  _focusedDay = _focusedDay.subtract(const Duration(days: 7));
+                                  _selectedDay = _focusedDay;
+                                  _didAutoScroll = false;
+                                });
+                              } else if (details.primaryVelocity! < -swipeThreshold) {
+                                // Swipe left - go to next week
+                                setState(() {
+                                  _focusedDay = _focusedDay.add(const Duration(days: 7));
+                                  _selectedDay = _focusedDay;
+                                  _didAutoScroll = false;
+                                });
+                              }
+                            }
+                          },
+                          child: showList
+                              ? _buildLessonList(
+                                  lessons,
+                                  weekDays,
+                                  students,
+                                  studentMap,
+                                  lessonStatuses,
+                                )
+                              : _buildWeekGrid(
+                                  context,
+                                  weekDays,
+                                  lessons,
+                                  students,
+                                  studentMap,
+                                  selectedDay,
+                                  lessonStatuses,
+                                  instructor: instructor,
+                                ),
+                        ),
                       ),
-                    ],
-                  ),
-                  floatingActionButton: FloatingActionButton(
-                    onPressed: students.isEmpty
-                        ? null
-                        : () => _showAddLesson(
-                              context,
-                              students,
-                              selectedDay,
-                            ),
-                    child: const Icon(Icons.add),
-                  ),
+                        ],
+                      ),
+                      floatingActionButton: FloatingActionButton(
+                        onPressed: students.isEmpty
+                            ? null
+                            : () => _showAddLesson(
+                                  context,
+                                  students,
+                                  selectedDay,
+                                ),
+                        child: const Icon(Icons.add),
+                      ),
+                    );
+                  },
                 );
               },
             );
@@ -239,51 +265,27 @@ class _CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  Widget _buildViewToggle(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Row(
-        children: [
-          ToggleButtons(
-            isSelected: [_showList == false, _showList == true],
-            onPressed: (index) {
-              setState(() => _showList = index == 1);
-            },
-            children: const [
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                child: Icon(Icons.grid_view, size: 16),
-              ),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                child: Icon(Icons.view_list, size: 16),
-              ),
-            ],
-          ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            onPressed: () {
-              setState(() {
-                _focusedDay = _focusedDay.subtract(const Duration(days: 7));
-                _selectedDay = _focusedDay;
-                _didAutoScroll = false;
-              });
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            onPressed: () {
-              setState(() {
-                _focusedDay = _focusedDay.add(const Duration(days: 7));
-                _selectedDay = _focusedDay;
-                _didAutoScroll = false;
-              });
-            },
-          ),
-        ],
-      ),
-    );
+
+  int _calculateStartHour(List<Lesson> lessons, List<DateTime> weekDays) {
+    // Get lessons in the current week
+    final weekLessons = lessons
+        .where((lesson) => weekDays.any((day) => _isSameDay(day, lesson.startAt)))
+        .toList();
+    
+    if (weekLessons.isEmpty) {
+      // No lessons, use default start hour
+      return _defaultStartHour;
+    }
+    
+    // Find the earliest lesson hour
+    weekLessons.sort((a, b) => a.startAt.compareTo(b.startAt));
+    final earliestLesson = weekLessons.first;
+    final earliestHour = earliestLesson.startAt.hour;
+    
+    // Use the earliest lesson hour, but ensure it's not negative
+    // Also ensure we don't go below 0 (midnight)
+    final calculatedHour = earliestHour < _defaultStartHour ? earliestHour : _defaultStartHour;
+    return calculatedHour.clamp(0, _endHour - 1);
   }
 
   Widget _buildWeekGrid(
@@ -293,9 +295,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
     List<Student> students,
     Map<String, String> studentMap,
     DateTime selectedDay,
-    Map<String, _LessonStatus> lessonStatuses,
-  ) {
-    final totalHours = _endHour - _startHour;
+    Map<String, _LessonStatus> lessonStatuses, {
+    UserProfile? instructor,
+  }) {
+    final currentInstructor = instructor ?? widget.instructor;
+    final startHour = _calculateStartHour(lessons, weekDays);
+    // Ensure we always have at least some hours to display
+    final totalHours = (_endHour - startHour).clamp(1, _endHour);
     final totalHeight = totalHours * _hourHeight;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -310,14 +316,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildTimeColumn(totalHours),
+                _buildTimeColumn(totalHours, startHour),
                 Expanded(
                   child: SingleChildScrollView(
                     controller: _gridScrollController,
                     scrollDirection: Axis.horizontal,
                     child: SizedBox(
                       width: gridWidth,
+                      height: totalHeight,
                       child: Stack(
+                        clipBehavior: Clip.none,
                         children: [
                           _buildGridBackground(
                             context,
@@ -325,12 +333,24 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             totalHours,
                             selectedDay,
                           ),
-                          _buildNowIndicator(weekDays, dayWidth),
+                          _NowIndicator(
+                            weekDays: weekDays,
+                            dayWidth: dayWidth,
+                            startHour: startHour,
+                            endHour: _endHour,
+                            hourHeight: _hourHeight,
+                          ),
                           Positioned.fill(
                             child: GestureDetector(
                               behavior: HitTestBehavior.translucent,
                               onTapDown: (details) {
-                                if (students.isEmpty) return;
+                                if (students.isEmpty) {
+                                  _showSnack(
+                                    context,
+                                    'Add a student first before adding a lesson.',
+                                  );
+                                  return;
+                                }
                                 final position = details.localPosition;
                                 if (position.dx < 0 || position.dy < 0) return;
                                 final dayIndex =
@@ -342,10 +362,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                     (position.dy / _hourHeight * 60).round();
                                 final snappedMinutes =
                                     (minutesFromStart / 15).round() * 15;
-                                final totalMinutes = (_startHour * 60) +
+                                final totalMinutes = (startHour * 60) +
                                     snappedMinutes.clamp(
                                       0,
-                                      (_endHour - _startHour) * 60 - 1,
+                                      (_endHour - startHour) * 60 - 1,
                                     );
                                 final tapDate = weekDays[dayIndex as int];
                                 final initialStart = DateTime(
@@ -372,6 +392,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             students,
                             studentMap,
                             lessonStatuses,
+                            startHour,
+                            instructor: currentInstructor,
                           ),
                         ],
                       ),
@@ -411,60 +433,60 @@ class _CalendarScreenState extends State<CalendarScreen> {
         final paymentState = _resolvePaymentState(status);
         final statusLabel = _paymentStatusLabel(paymentState, unpaidHours);
         final studentName = studentMap[lesson.studentId] ?? 'Student';
-        return ListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(studentName),
-          subtitle: Text(
-            '${DateFormat('EEE, d MMM').format(lesson.startAt)} · '
-            '${DateFormat('HH:mm').format(lesson.startAt)} · '
-            '$statusLabel',
+        final student = students.firstWhere(
+          (s) => s.id == lesson.studentId,
+          orElse: () => Student(
+            id: lesson.studentId,
+            instructorId: widget.instructor.id,
+            name: studentName,
+            balanceHours: 0,
+            status: 'active',
           ),
-          trailing: PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'profile') {
-                _openStudentProfile(
-                  context,
-                  lesson.studentId,
-                  studentName,
-                );
-              } else if (value == 'edit') {
-                _showEditLesson(context, lesson, students);
-              } else if (value == 'delete') {
-                _confirmDeleteLesson(context, lesson);
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'profile',
-                child: const Text('Profile'),
-              ),
-              PopupMenuItem(
-                value: 'edit',
-                child: const Text('Edit'),
-              ),
-              PopupMenuItem(
-                value: 'delete',
-                child: const Text('Delete'),
-              ),
-              if (paymentState == _LessonPaymentState.unpaid)
-                PopupMenuItem(
-                  enabled: false,
-                  child: Text(
-                    'Unpaid',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontWeight: FontWeight.w600,
+        );
+        return GestureDetector(
+          onTap: () => _showLessonActions(
+            context,
+            lesson,
+            students,
+            studentMap,
+          ),
+          onLongPress: () => _showLessonEditDeleteActions(
+            context,
+            lesson,
+            students,
+          ),
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(studentName),
+            subtitle: Text(
+              '${DateFormat('EEE, d MMM').format(lesson.startAt)} · '
+              '${DateFormat('HH:mm').format(lesson.startAt)} · '
+              '$statusLabel',
+            ),
+            trailing: paymentState == _LessonPaymentState.unpaid
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.error.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(4),
                     ),
-                  ),
-                ),
-            ],
+                    child: Text(
+                      'Unpaid',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                    ),
+                  )
+                : null,
           ),
         );
       },
     );
   }
 
-  Widget _buildTimeColumn(int totalHours) {
+  Widget _buildTimeColumn(int totalHours, int startHour) {
     final columnHeight = totalHours * _hourHeight;
     return SizedBox(
       width: _timeColumnWidth,
@@ -473,7 +495,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         children: List.generate(
           totalHours,
           (index) {
-            final hour = _startHour + index;
+            final hour = startHour + index;
             return SizedBox(
               height: _hourHeight,
               child: Align(
@@ -536,29 +558,69 @@ class _CalendarScreenState extends State<CalendarScreen> {
     List<Student> students,
     Map<String, String> studentMap,
     Map<String, _LessonStatus> lessonStatuses,
-  ) {
-    _maybeAutoScrollToLessons(lessons, weekDays);
-    return lessons
+    int startHour, {
+    UserProfile? instructor,
+  }) {
+    final currentInstructor = instructor ?? widget.instructor;
+    _maybeAutoScrollToLessons(lessons, weekDays, startHour);
+    
+    // Debug: Log week days and lessons
+    debugPrint('[calendar] Building lesson blocks for week: ${weekDays.map((d) => '${d.year}-${d.month}-${d.day}').join(', ')}');
+    debugPrint('[calendar] Total lessons: ${lessons.length}, startHour: $startHour');
+    
+    final filteredLessons = lessons
         .where((lesson) =>
             weekDays.any((day) => _isSameDay(day, lesson.startAt)))
-        .map((lesson) {
+        .toList();
+    
+    debugPrint('[calendar] Filtered lessons for week: ${filteredLessons.length}');
+    for (final lesson in filteredLessons) {
+      debugPrint('[calendar] Lesson: ${lesson.startAt.toIso8601String()}, student: ${studentMap[lesson.studentId]}');
+    }
+    
+    return filteredLessons.map((lesson) {
       final dayIndex = weekDays.indexWhere(
         (day) => _isSameDay(day, lesson.startAt),
       );
-      if (dayIndex < 0) return const SizedBox.shrink();
+      if (dayIndex < 0) {
+        debugPrint('[calendar] Lesson ${lesson.id} dayIndex < 0');
+        return const SizedBox.shrink();
+      }
+      // Normalize lesson start time to local date for accurate calculation
+      final lessonLocal = DateTime(
+        lesson.startAt.year,
+        lesson.startAt.month,
+        lesson.startAt.day,
+        lesson.startAt.hour,
+        lesson.startAt.minute,
+      );
       final startMinutes =
-          (lesson.startAt.hour * 60 + lesson.startAt.minute) -
-              (_startHour * 60);
+          (lessonLocal.hour * 60 + lessonLocal.minute) -
+              (startHour * 60);
       final top = (startMinutes / 60) * _hourHeight;
-      if (top < 0 || top > (_endHour - _startHour) * _hourHeight) {
+      final maxHeight = (_endHour - startHour) * _hourHeight;
+      
+      // Allow lessons that start slightly before startHour (within reason) to still show
+      // This handles edge cases where lessons are at the boundary
+      if (top < -_hourHeight || top > maxHeight + _hourHeight) {
         debugPrint(
           '[calendar] lesson out of range id=${lesson.id} '
           'start=${lesson.startAt.toIso8601String()} '
-          'range=${_startHour.toString().padLeft(2, '0')}:00-'
+          'hour=${lesson.startAt.hour}:${lesson.startAt.minute.toString().padLeft(2, '0')} '
+          'top=$top maxHeight=$maxHeight '
+          'range=${startHour.toString().padLeft(2, '0')}:00-'
           '${_endHour.toString().padLeft(2, '0')}:00',
         );
         return const SizedBox.shrink();
       }
+      
+      // Clamp the top position to ensure it's visible
+      final clampedTop = top.clamp(0.0, maxHeight);
+      
+      debugPrint(
+        '[calendar] Rendering lesson ${lesson.id} at top=$clampedTop, '
+        'dayIndex=$dayIndex, hour=${lesson.startAt.hour}:${lesson.startAt.minute.toString().padLeft(2, '0')}',
+      );
       final height = lesson.durationHours * _hourHeight;
       final left = dayIndex * dayWidth + 4;
       final status = lessonStatuses[lesson.id];
@@ -568,6 +630,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       final backgroundColor = _lessonColor(
         lessonType: lesson.lessonType,
         isPast: isPast,
+        instructor: currentInstructor,
       );
       final statusLabel = _paymentStatusLabel(paymentState, unpaidHours);
       final endAt = lesson.startAt.add(
@@ -579,7 +642,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               ? const Color(0xFF4CAF50)
               : Colors.grey;
       return Positioned(
-        top: top,
+        top: clampedTop,
         left: dayIndex * dayWidth + 1,
         width: dayWidth - 2,
         height: height,
@@ -589,6 +652,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
             lesson,
             students,
             studentMap,
+          ),
+          onLongPress: () => _showLessonEditDeleteActions(
+            context,
+            lesson,
+            students,
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
@@ -681,7 +749,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   bool _isSameDay(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
+    // Normalize both dates to local time and compare only date components
+    final aLocal = DateTime(a.year, a.month, a.day);
+    final bLocal = DateTime(b.year, b.month, b.day);
+    return aLocal == bLocal;
   }
 
   bool _isLessonPast(Lesson lesson) {
@@ -713,67 +784,226 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Color _lessonColor({
     required String lessonType,
     required bool isPast,
+    UserProfile? instructor,
   }) {
-    final base = switch (lessonType) {
-      'mock_test' => Colors.deepPurple,
-      'test' => Colors.blue,
-      _ => Colors.orange,
-    };
+    // Get custom colors from settings, or use defaults
+    final currentInstructor = instructor ?? widget.instructor;
+    final settings = currentInstructor.instructorSettings;
+    final savedColors = settings?.lessonColors;
+    
+    Color base;
+    if (savedColors != null && savedColors.containsKey(lessonType)) {
+      base = Color(savedColors[lessonType]!);
+    } else {
+      // Check if it's a custom lesson type
+      final customTypes = settings?.customLessonTypes ?? [];
+      try {
+        final customType = customTypes.firstWhere((t) => t.id == lessonType);
+        if (customType.color != null) {
+          base = Color(customType.color!);
+        } else {
+          base = switch (lessonType) {
+            'test' => Colors.blue,
+            'mock_test' => Colors.deepPurple,
+            _ => Colors.orange,
+          };
+        }
+      } catch (_) {
+        base = switch (lessonType) {
+          'test' => Colors.blue,
+          'mock_test' => Colors.deepPurple,
+          _ => Colors.orange,
+        };
+      }
+    }
+    
     return base.withOpacity(isPast ? 0.85 : 0.9);
   }
 
-  String _lessonTypeLabel(String lessonType) {
+  String _lessonTypeLabel(String lessonType, {UserProfile? instructor}) {
     switch (lessonType) {
       case 'mock_test':
         return 'Mock test';
       case 'test':
         return 'Driving test';
+      case 'lesson':
+        return 'Driving lesson';
       default:
-        return 'Lesson';
+        // Check if it's a custom lesson type
+        if (instructor != null) {
+          final customTypes = instructor.instructorSettings?.customLessonTypes ?? [];
+          try {
+            final customType = customTypes.firstWhere((t) => t.id == lessonType);
+            return customType.label;
+          } catch (_) {
+            return lessonType; // Fallback to type ID if not found
+          }
+        }
+        return lessonType;
     }
   }
 
-  Widget _buildNowIndicator(List<DateTime> weekDays, double dayWidth) {
-    final now = DateTime.now();
-    final todayIndex = weekDays.indexWhere((day) => _isSameDay(day, now));
-    if (todayIndex < 0) {
-      return const SizedBox.shrink();
+  List<Map<String, dynamic>> _getAllLessonTypes({UserProfile? instructor}) {
+    final builtInTypes = [
+      {'id': 'lesson', 'label': 'Driving lesson'},
+      {'id': 'test', 'label': 'Driving test'},
+      {'id': 'mock_test', 'label': 'Mock test'},
+    ];
+    
+    if (instructor != null) {
+      final customTypes = instructor.instructorSettings?.customLessonTypes ?? [];
+      final customTypeList = customTypes.map((t) => {
+        'id': t.id,
+        'label': t.label,
+      }).toList();
+      
+      return [...builtInTypes, ...customTypeList];
     }
-    final minutesFromStart =
-        (now.hour * 60 + now.minute) - (_startHour * 60);
-    if (minutesFromStart < 0 ||
-        minutesFromStart > (_endHour - _startHour) * 60) {
-      return const SizedBox.shrink();
-    }
-    final top = (minutesFromStart / 60) * _hourHeight;
-    final left = todayIndex * dayWidth;
-    return Positioned(
-      top: top,
-      left: left,
-      width: dayWidth,
-      child: IgnorePointer(
-        child: Row(
-          children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: const BoxDecoration(
-                color: Colors.blueAccent,
-                shape: BoxShape.circle,
-              ),
+    
+    return builtInTypes;
+  }
+
+  List<Map<String, dynamic>> _getLessonTypeOptionsFromList(List<CustomLessonType> customTypes) {
+    const builtIn = [
+      {'id': 'lesson', 'label': 'Driving lesson'},
+      {'id': 'test', 'label': 'Driving test'},
+      {'id': 'mock_test', 'label': 'Mock test'},
+    ];
+    final custom = customTypes.map((t) => {'id': t.id, 'label': t.label}).toList();
+    return [...builtIn, ...custom];
+  }
+
+  static const String _addNewLessonTypeValue = '__add_new__';
+
+  Widget _buildLessonTypeDropdown(
+    BuildContext context,
+    String lessonType,
+    List<CustomLessonType> customTypes,
+    void Function(String) onLessonTypeChanged,
+    StateSetter setDialogState,
+  ) {
+    final options = _getLessonTypeOptionsFromList(customTypes);
+    final value = lessonType == _addNewLessonTypeValue || !options.any((o) => o['id'] == lessonType)
+        ? 'lesson'
+        : lessonType;
+    return DropdownButtonFormField<String>(
+      value: value,
+      decoration: const InputDecoration(labelText: 'Lesson type'),
+      items: [
+        ...options.map((type) => DropdownMenuItem(
+          value: type['id'] as String,
+          child: Text(type['label'] as String),
+        )),
+        const DropdownMenuItem(
+          value: _addNewLessonTypeValue,
+          child: Row(
+            children: [
+              Icon(Icons.add_rounded, size: 20, color: AppTheme.primary),
+              SizedBox(width: 8),
+              Text('Add new type...', style: TextStyle(color: AppTheme.primary)),
+            ],
+          ),
+        ),
+      ],
+      onChanged: (value) async {
+        if (value == null) return;
+        if (value == _addNewLessonTypeValue) {
+          final newId = await _showAddLessonTypeDialogResult(context, customTypes, setDialogState);
+          if (newId != null) {
+            onLessonTypeChanged(newId);
+            setDialogState(() {});
+          }
+          return;
+        }
+        onLessonTypeChanged(value);
+      },
+    );
+  }
+
+  Future<String?> _showAddLessonTypeDialogResult(
+    BuildContext context,
+    List<CustomLessonType> customTypes,
+    StateSetter setDialogState,
+  ) async {
+    final labelController = TextEditingController();
+    Color selectedColor = Colors.orange;
+    final colors = [Colors.orange, Colors.blue, Colors.deepPurple, Colors.green, Colors.red, Colors.teal, Colors.pink, Colors.amber];
+    final resultId = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('New lesson type'),
+          content: SizedBox(
+            width: 280,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: labelController,
+                  decoration: const InputDecoration(labelText: 'Type name', hintText: 'e.g. Intensive'),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 16),
+                const Text('Color', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: colors.map((c) {
+                    final isSelected = c.value == selectedColor.value;
+                    return GestureDetector(
+                      onTap: () => setState(() => selectedColor = c),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: c,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: isSelected ? Colors.white : Colors.transparent, width: 3),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
             ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Container(
-                height: 2,
-                color: Colors.blueAccent,
-              ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                final label = labelController.text.trim();
+                if (label.isEmpty) return;
+                final id = label.toLowerCase().replaceAll(' ', '_').replaceAll(RegExp(r'[^a-z0-9_]'), '');
+                if (id.isEmpty) return;
+                if (customTypes.any((t) => t.id == id)) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('This lesson type already exists')));
+                  return;
+                }
+                customTypes.add(CustomLessonType(id: id, label: label, color: selectedColor.value));
+                final current = widget.instructor.instructorSettings;
+                final newSettings = InstructorSettings(
+                  cancellationRules: current?.cancellationRules,
+                  reminderHoursBefore: current?.reminderHoursBefore,
+                  notificationSettings: current?.notificationSettings,
+                  defaultNavigationApp: current?.defaultNavigationApp,
+                  lessonColors: current?.lessonColors,
+                  defaultCalendarView: current?.defaultCalendarView,
+                  customPaymentMethods: current?.customPaymentMethods,
+                  customLessonTypes: customTypes,
+                );
+                await _firestoreService.updateUserProfile(widget.instructor.id, {'instructorSettings': newSettings.toMap()});
+                if (ctx.mounted) Navigator.pop(ctx, id);
+              },
+              child: const Text('Add'),
             ),
           ],
         ),
       ),
     );
+    return resultId;
   }
+
 
   DateTime _startOfWeek(DateTime day) {
     final normalized = DateTime(day.year, day.month, day.day);
@@ -809,6 +1039,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         builder: (_) => StudentDetailScreen(
           studentId: studentId,
           studentName: studentName,
+          instructorId: widget.instructor.id,
         ),
       ),
     );
@@ -840,19 +1071,77 @@ class _CalendarScreenState extends State<CalendarScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(
-                leading: const Icon(Icons.person),
-                title: const Text('Profile'),
-                subtitle: Text(studentName),
-                onTap: () {
-                  Navigator.pop(context);
-                  _openStudentProfile(
-                    parentContext,
-                    lesson.studentId,
-                    studentName,
-                  );
-                },
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pop(context);
+                          _openStudentProfile(
+                            parentContext,
+                            lesson.studentId,
+                            studentName,
+                          );
+                        },
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.person, size: 32),
+                            const SizedBox(height: 4),
+                            const Text('Profile', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (student.phone != null && student.phone!.isNotEmpty) ...[
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.pop(context);
+                            _makePhoneCall(student.phone!);
+                          },
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.phone, size: 32, color: AppTheme.primary),
+                              const SizedBox(height: 4),
+                              const Text('Call', style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.pop(context);
+                            _sendSMS(student.phone!);
+                          },
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.message, size: 32, color: AppTheme.primary),
+                              const SizedBox(height: 4),
+                              const Text('Message', style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
+              if (student.phone != null && student.phone!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Text(
+                    student.phone!,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               if (student.address != null && student.address!.isNotEmpty) ...[
                 const Divider(),
                 ListTile(
@@ -866,9 +1155,28 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 ),
                 const Divider(),
                 _buildNotificationButtons(context, lesson, student),
-                const Divider(),
               ],
-              const Divider(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showLessonEditDeleteActions(
+    BuildContext context,
+    Lesson lesson,
+    List<Student> students,
+  ) async {
+    final parentContext = context;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
                 leading: const Icon(Icons.edit),
                 title: const Text('Edit lesson'),
@@ -878,8 +1186,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.delete),
-                title: const Text('Delete lesson'),
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Delete lesson', style: TextStyle(color: Colors.red)),
                 onTap: () async {
                   Navigator.pop(context);
                   await _confirmDeleteLesson(parentContext, lesson);
@@ -890,6 +1198,48 @@ class _CalendarScreenState extends State<CalendarScreen> {
         );
       },
     );
+  }
+
+  Future<void> _makePhoneCall(String phoneNumber) async {
+    final uri = Uri.parse('tel:$phoneNumber');
+    try {
+      await launchUrl(uri);
+    } catch (e) {
+      debugPrint('Error making phone call: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to make call: $e'),
+            backgroundColor: AppTheme.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendSMS(String phoneNumber) async {
+    final uri = Uri.parse('sms:$phoneNumber');
+    try {
+      await launchUrl(uri);
+    } catch (e) {
+      debugPrint('Error sending SMS: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to send message: $e'),
+            backgroundColor: AppTheme.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _openNavigation(String address, Lesson lesson, Student student) async {
@@ -1060,25 +1410,31 @@ class _CalendarScreenState extends State<CalendarScreen> {
   void _maybeAutoScrollToLessons(
     List<Lesson> lessons,
     List<DateTime> weekDays,
+    int startHour,
   ) {
     if (_didAutoScroll || !_verticalController.hasClients) return;
     final weekLessons = lessons
         .where((lesson) => weekDays.any((day) => _isSameDay(day, lesson.startAt)))
         .toList();
+    
+    // Always scroll to default scroll hour (06:00) relative to the start hour
     final defaultHour =
-        _defaultScrollHour.clamp(_startHour, _endHour - 1).toInt();
-    final defaultMinutesFromStart = (defaultHour - _startHour) * 60;
+        _defaultScrollHour.clamp(startHour, _endHour - 1).toInt();
+    final defaultMinutesFromStart = (defaultHour - startHour) * 60;
     var targetMinutesFromStart = defaultMinutesFromStart;
+    
+    // If there are lessons and the earliest one is before the default scroll hour,
+    // scroll to show the earliest lesson instead
     if (weekLessons.isNotEmpty) {
       weekLessons.sort((a, b) => a.startAt.compareTo(b.startAt));
       final first = weekLessons.first.startAt;
       final firstMinutesFromStart =
-          (first.hour * 60 + first.minute) - (_startHour * 60);
-      if (firstMinutesFromStart < 0) return;
-      if (firstMinutesFromStart < defaultMinutesFromStart) {
+          (first.hour * 60 + first.minute) - (startHour * 60);
+      if (firstMinutesFromStart >= 0 && firstMinutesFromStart < defaultMinutesFromStart) {
         targetMinutesFromStart = firstMinutesFromStart;
       }
     }
+    
     final top = (targetMinutesFromStart / 60) * _hourHeight;
     _didAutoScroll = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1130,12 +1486,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
     DateTime selectedDay, {
     DateTime? initialStart,
   }) async {
+    if (students.isEmpty) {
+      _showSnack(context, 'Add a student first before adding a lesson.');
+      return;
+    }
     Student? selectedStudent; // Start with no student selected
     final durationController = TextEditingController(text: '1');
     String lessonType = 'lesson';
     DateTime lessonDate = initialStart ?? selectedDay;
     TimeOfDay time = TimeOfDay.fromDateTime(
       initialStart ?? DateTime.now(),
+    );
+    final customTypes = List<CustomLessonType>.from(
+      widget.instructor.instructorSettings?.customLessonTypes ?? [],
     );
 
     await showDialog<void>(
@@ -1197,29 +1560,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             const TextInputType.numberWithOptions(decimal: true),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: lessonType,
-                        decoration:
-                            const InputDecoration(labelText: 'Lesson type'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'lesson',
-                            child: Text('Driving lesson'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'test',
-                            child: Text('Driving test'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'mock_test',
-                            child: Text('Mock test'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            setDialogState(() => lessonType = value);
-                          }
-                        },
+                      _buildLessonTypeDropdown(
+                        context,
+                        lessonType,
+                        customTypes,
+                        (value) => setDialogState(() => lessonType = value),
+                        setDialogState,
                       ),
                       const SizedBox(height: 12),
                       TextButton.icon(
@@ -1276,31 +1622,61 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   onPressed: selectedStudent == null
                       ? null
                       : () async {
-                          final duration =
-                              double.tryParse(durationController.text) ?? 1;
-                          final startAt = DateTime(
-                            lessonDate.year,
-                            lessonDate.month,
-                            lessonDate.day,
-                            time.hour,
-                            time.minute,
-                          );
-                          final lesson = Lesson(
-                            id: '',
-                            instructorId: widget.instructor.id,
-                            studentId: selectedStudent!.id,
-                            schoolId: widget.instructor.schoolId,
-                            startAt: startAt,
-                            durationHours: duration,
-                            lessonType: lessonType,
-                            notes: null,
-                          );
-                          await _firestoreService.addLesson(
-                            lesson: lesson,
-                            studentId: selectedStudent!.id,
-                          );
-                          if (context.mounted) {
-                            Navigator.pop(context);
+                          try {
+                            final duration =
+                                double.tryParse(durationController.text) ?? 1;
+                            if (duration <= 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Duration must be greater than 0'),
+                                ),
+                              );
+                              return;
+                            }
+                            final startAt = DateTime(
+                              lessonDate.year,
+                              lessonDate.month,
+                              lessonDate.day,
+                              time.hour,
+                              time.minute,
+                            );
+                            final lesson = Lesson(
+                              id: '',
+                              instructorId: widget.instructor.id,
+                              studentId: selectedStudent!.id,
+                              schoolId: widget.instructor.schoolId,
+                              startAt: startAt,
+                              durationHours: duration,
+                              lessonType: lessonType,
+                              notes: null,
+                            );
+                            await _firestoreService.addLesson(
+                              lesson: lesson,
+                              studentId: selectedStudent!.id,
+                            );
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              // Navigate to the week containing the lesson if it's not the current week
+                              final lessonWeekStart = _startOfWeek(startAt);
+                              final currentWeekStart = _startOfWeek(_focusedDay);
+                              if (!_isSameDay(lessonWeekStart, currentWeekStart)) {
+                                setState(() {
+                                  _focusedDay = startAt;
+                                  _selectedDay = startAt;
+                                  _didAutoScroll = false;
+                                });
+                              }
+                            }
+                          } catch (e) {
+                            debugPrint('[calendar] Error adding lesson: $e');
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Failed to add lesson: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
                           }
                         },
                   child: const Text('Save'),
@@ -1333,6 +1709,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
     DateTime lessonDate = lesson.startAt;
     TimeOfDay time = TimeOfDay.fromDateTime(lesson.startAt);
     bool saving = false;
+    final customTypes = List<CustomLessonType>.from(
+      widget.instructor.instructorSettings?.customLessonTypes ?? [],
+    );
 
     await showDialog<void>(
       context: context,
@@ -1395,29 +1774,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             const TextInputType.numberWithOptions(decimal: true),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: lessonType,
-                        decoration:
-                            const InputDecoration(labelText: 'Lesson type'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'lesson',
-                            child: Text('Driving lesson'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'test',
-                            child: Text('Driving test'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'mock_test',
-                            child: Text('Mock test'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            setDialogState(() => lessonType = value);
-                          }
-                        },
+                      _buildLessonTypeDropdown(
+                        context,
+                        lessonType,
+                        customTypes,
+                        (value) => setDialogState(() => lessonType = value),
+                        setDialogState,
                       ),
                       const SizedBox(height: 12),
                       TextButton.icon(
@@ -1595,4 +1957,94 @@ enum _LessonPaymentState {
   paid,
   unpaid,
   pending,
+}
+
+class _NowIndicator extends StatefulWidget {
+  const _NowIndicator({
+    required this.weekDays,
+    required this.dayWidth,
+    required this.startHour,
+    required this.endHour,
+    required this.hourHeight,
+  });
+
+  final List<DateTime> weekDays;
+  final double dayWidth;
+  final int startHour;
+  final int endHour;
+  final double hourHeight;
+
+  @override
+  State<_NowIndicator> createState() => _NowIndicatorState();
+}
+
+class _NowIndicatorState extends State<_NowIndicator> {
+  Timer? _timer;
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    // Normalize both dates to local time and compare only date components
+    final aLocal = DateTime(a.year, a.month, a.day);
+    final bLocal = DateTime(b.year, b.month, b.day);
+    return aLocal == bLocal;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Update every minute to move the indicator
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final todayIndex = widget.weekDays.indexWhere((day) => _isSameDay(day, now));
+    if (todayIndex < 0) {
+      return const SizedBox.shrink();
+    }
+    final minutesFromStart =
+        (now.hour * 60 + now.minute) - (widget.startHour * 60);
+    if (minutesFromStart < 0 ||
+        minutesFromStart > (widget.endHour - widget.startHour) * 60) {
+      return const SizedBox.shrink();
+    }
+    final top = (minutesFromStart / 60) * widget.hourHeight;
+    final left = todayIndex * widget.dayWidth;
+    return Positioned(
+      top: top,
+      left: left,
+      width: widget.dayWidth,
+      child: IgnorePointer(
+        child: Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: const BoxDecoration(
+                color: Colors.blueAccent,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Container(
+                height: 2,
+                color: Colors.blueAccent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

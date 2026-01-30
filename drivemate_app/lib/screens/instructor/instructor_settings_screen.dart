@@ -29,6 +29,9 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
   
   // Navigation settings
   late String? _defaultNavigationApp;
+  
+  // Lesson colors
+  late Map<String, Color> _lessonColors;
 
   // Options
   static const List<int> reminderHoursOptions = [1, 2, 6, 12, 24];
@@ -39,6 +42,13 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
     {'value': 'google_maps', 'label': 'Google Maps'},
     {'value': 'apple_maps', 'label': 'Apple Maps'},
   ];
+  
+  // Default lesson colors
+  static const Map<String, Color> defaultLessonColors = {
+    'lesson': Colors.orange,
+    'test': Colors.blue,
+    'mock_test': Colors.deepPurple,
+  };
 
   @override
   void initState() {
@@ -66,6 +76,20 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
     
     // Navigation settings
     _defaultNavigationApp = settings?.defaultNavigationApp ?? 'system';
+    
+    // Lesson colors
+    final savedColors = settings?.lessonColors;
+    _lessonColors = {
+      'lesson': savedColors?['lesson'] != null
+          ? Color(savedColors!['lesson']!)
+          : defaultLessonColors['lesson']!,
+      'test': (savedColors?['test'] != null)
+          ? Color(savedColors!['test']!)
+          : defaultLessonColors['test']!,
+      'mock_test': (savedColors?['mock_test'] != null)
+          ? Color(savedColors!['mock_test']!)
+          : defaultLessonColors['mock_test']!,
+    };
   }
 
   Future<void> _saveSettings() async {
@@ -83,6 +107,11 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
           'autoSendArrived': _autoSendArrived,
         },
         defaultNavigationApp: _defaultNavigationApp == 'system' ? null : _defaultNavigationApp,
+        lessonColors: {
+          'lesson': _lessonColors['lesson']!.value,
+          'test': _lessonColors['test']!.value,
+          'mock_test': _lessonColors['mock_test']!.value,
+        },
       );
 
       await _firestoreService.updateUserProfile(widget.instructor.id, {
@@ -154,22 +183,21 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppTheme.neutral50,
       appBar: AppBar(
-        backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Settings',
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w600,
-            color: AppTheme.neutral900,
+            color: colorScheme.onSurface,
           ),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.neutral700),
+          icon: Icon(Icons.arrow_back_rounded, color: colorScheme.onSurfaceVariant),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -180,11 +208,11 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _buildNotificationSection(),
+                  const SizedBox(height: 32),
                   _buildCancellationRulesSection(),
                   const SizedBox(height: 32),
-                  _buildReminderSection(),
-                  const SizedBox(height: 32),
-                  _buildNotificationSection(),
+                  _buildCalendarColorsSection(),
                   const SizedBox(height: 32),
                   _buildNavigationSection(),
                   const SizedBox(height: 40),
@@ -196,12 +224,12 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                       child: _saving
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation(Colors.white),
+                                valueColor: AlwaysStoppedAnimation(colorScheme.onPrimary),
                               ),
                             )
                           : const Text('Save Settings'),
@@ -219,7 +247,7 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader(
-          title: 'Cancellation Rules',
+          title: 'Cancellations',
           subtitle: 'Configure charges based on cancellation timing',
           icon: Icons.event_busy_rounded,
           iconColor: AppTheme.warning,
@@ -229,9 +257,9 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.neutral200),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -239,12 +267,12 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Rules',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.neutral900,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   TextButton.icon(
@@ -256,11 +284,11 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
               ),
               const SizedBox(height: 16),
               if (_cancellationRules.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(16),
+                Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Text(
                     'No cancellation rules. Add a rule to configure charges.',
-                    style: TextStyle(color: AppTheme.neutral500),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 )
               else
@@ -280,13 +308,14 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
   }
 
   Widget _buildCancellationRuleItem(int index, CancellationRule rule) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       margin: EdgeInsets.only(bottom: index < _cancellationRules.length - 1 ? 16 : 0),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.neutral50,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         children: [
@@ -349,9 +378,9 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
           const SizedBox(height: 8),
           Text(
             'If cancelled ${rule.hoursBefore}h or less before lesson: Charge ${rule.chargePercent}%',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: AppTheme.neutral600,
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -359,22 +388,22 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
     );
   }
 
-  Widget _buildReminderSection() {
+  Widget _buildNotificationSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader(
-          title: 'Lesson Reminders',
-          subtitle: 'Configure automatic student notifications',
-          icon: Icons.notifications_active_rounded,
-          iconColor: AppTheme.info,
-          iconBgColor: AppTheme.infoLight,
+          title: 'Notifications',
+          subtitle: 'Configure automatic notifications and reminders',
+          icon: Icons.notifications_outlined,
+          iconColor: AppTheme.primary,
+          iconBgColor: AppTheme.primary.withOpacity(0.1),
         ),
         const SizedBox(height: 16),
         _buildSettingCard(
           children: [
             _buildDropdownSetting(
-              label: 'Reminder time',
+              label: 'Lesson Reminder Time',
               description: 'When to send lesson reminders to students',
               value: _reminderHoursBefore,
               items: reminderHoursOptions
@@ -389,30 +418,7 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
                 }
               },
             ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        _buildInfoNote(
-          'Students will receive a push notification $_reminderHoursBefore ${_reminderHoursBefore == 1 ? 'hour' : 'hours'} before their lesson.',
-        ),
-      ],
-    );
-  }
-
-  Widget _buildNotificationSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(
-          title: 'Notification Settings',
-          subtitle: 'Configure automatic notifications when navigating',
-          icon: Icons.notifications_outlined,
-          iconColor: AppTheme.primary,
-          iconBgColor: AppTheme.primary.withOpacity(0.1),
-        ),
-        const SizedBox(height: 16),
-        _buildSettingCard(
-          children: [
+            const Divider(height: 32),
             SwitchListTile(
               title: const Text('Auto-send "On Way"'),
               subtitle: const Text('Automatically notify student when you open navigation'),
@@ -428,8 +434,123 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 8),
+        _buildInfoNote(
+          'Students will receive a push notification $_reminderHoursBefore ${_reminderHoursBefore == 1 ? 'hour' : 'hours'} before their lesson.',
+        ),
       ],
     );
+  }
+
+  Widget _buildCalendarColorsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          title: 'Calendar Colors',
+          subtitle: 'Customize colors for each lesson type',
+          icon: Icons.palette_outlined,
+          iconColor: AppTheme.secondary,
+          iconBgColor: AppTheme.secondaryLight,
+        ),
+        const SizedBox(height: 16),
+        _buildSettingCard(
+          children: [
+            _buildColorPickerItem(
+              label: 'Driving Lesson',
+              lessonType: 'lesson',
+              color: _lessonColors['lesson']!,
+            ),
+            const Divider(height: 32),
+            _buildColorPickerItem(
+              label: 'Driving Test',
+              lessonType: 'test',
+              color: _lessonColors['test']!,
+            ),
+            const Divider(height: 32),
+            _buildColorPickerItem(
+              label: 'Mock Test',
+              lessonType: 'mock_test',
+              color: _lessonColors['mock_test']!,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildColorPickerItem({
+    required String label,
+    required String lessonType,
+    required Color color,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: () => _showColorPicker(lessonType, color),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: colorScheme.outline,
+                  width: 1,
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '#${color.value.toRadixString(16).substring(2).toUpperCase()}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showColorPicker(String lessonType, Color currentColor) async {
+    final Color? pickedColor = await showDialog<Color>(
+      context: context,
+      builder: (context) => _ColorPickerDialog(
+        currentColor: currentColor,
+        lessonType: lessonType,
+      ),
+    );
+    
+    if (pickedColor != null) {
+      setState(() {
+        _lessonColors[lessonType] = pickedColor;
+      });
+    }
   }
 
   Widget _buildNavigationSection() {
@@ -514,12 +635,13 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
   }
 
   Widget _buildSettingCard({required List<Widget> children}) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(children: children),
     );
@@ -532,23 +654,24 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
     required List<DropdownMenuItem<T>> items,
     required ValueChanged<T?> onChanged,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w600,
-            color: AppTheme.neutral900,
+            color: colorScheme.onSurface,
           ),
         ),
         const SizedBox(height: 4),
         Text(
           description,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13,
-            color: AppTheme.neutral500,
+            color: colorScheme.onSurfaceVariant,
           ),
         ),
         const SizedBox(height: 12),
@@ -556,9 +679,9 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: AppTheme.neutral100,
+            color: colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.neutral200),
+            border: Border.all(color: colorScheme.outlineVariant),
           ),
           child: DropdownButton<T>(
             value: value,
@@ -567,10 +690,10 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
             isExpanded: true,
             underline: const SizedBox.shrink(),
             icon: const Icon(Icons.keyboard_arrow_down_rounded),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w500,
-              color: AppTheme.neutral900,
+              color: colorScheme.onSurface,
             ),
           ),
         ),
@@ -606,6 +729,263 @@ class _InstructorSettingsScreenState extends State<InstructorSettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ColorPickerDialog extends StatefulWidget {
+  const _ColorPickerDialog({
+    required this.currentColor,
+    required this.lessonType,
+  });
+
+  final Color currentColor;
+  final String lessonType;
+
+  @override
+  State<_ColorPickerDialog> createState() => _ColorPickerDialogState();
+}
+
+class _ColorPickerDialogState extends State<_ColorPickerDialog> {
+  late Color _selectedColor;
+
+  // Predefined color palette
+  static const List<Color> _colorPalette = [
+    Colors.orange,
+    Colors.blue,
+    Colors.deepPurple,
+    Colors.green,
+    Colors.red,
+    Colors.teal,
+    Colors.pink,
+    Colors.indigo,
+    Colors.amber,
+    Colors.cyan,
+    Colors.lime,
+    Colors.brown,
+    Colors.blueGrey,
+    Colors.deepOrange,
+    Colors.purple,
+    Colors.lightBlue,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedColor = widget.currentColor;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Choose Color for ${_getLessonTypeLabel(widget.lessonType)}'),
+      content: SizedBox(
+        width: 300,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Current color preview
+            Container(
+              width: double.infinity,
+              height: 60,
+              decoration: BoxDecoration(
+                color: _selectedColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppTheme.neutral300,
+                  width: 2,
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  'Preview',
+                  style: TextStyle(
+                    color: _getContrastColor(_selectedColor),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Color palette grid
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: _colorPalette.map((color) {
+                final isSelected = _selectedColor.value == color.value;
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedColor = color),
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSelected ? AppTheme.primary : AppTheme.neutral300,
+                        width: isSelected ? 3 : 1,
+                      ),
+                    ),
+                    child: isSelected
+                        ? const Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 24,
+                          )
+                        : null,
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            // Custom color picker button
+            OutlinedButton.icon(
+              onPressed: () async {
+                final Color? picked = await showDialog<Color>(
+                  context: context,
+                  builder: (context) => _FullColorPickerDialog(
+                    currentColor: _selectedColor,
+                  ),
+                );
+                if (picked != null) {
+                  setState(() => _selectedColor = picked);
+                }
+              },
+              icon: const Icon(Icons.colorize),
+              label: const Text('Custom Color'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _selectedColor),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+
+  String _getLessonTypeLabel(String lessonType) {
+    switch (lessonType) {
+      case 'test':
+        return 'Driving Test';
+      case 'mock_test':
+        return 'Mock Test';
+      default:
+        return 'Driving Lesson';
+    }
+  }
+
+  Color _getContrastColor(Color color) {
+    // Calculate relative luminance
+    final luminance = (0.299 * color.red + 0.587 * color.green + 0.114 * color.blue) / 255;
+    return luminance > 0.5 ? Colors.black : Colors.white;
+  }
+}
+
+class _FullColorPickerDialog extends StatefulWidget {
+  const _FullColorPickerDialog({required this.currentColor});
+
+  final Color currentColor;
+
+  @override
+  State<_FullColorPickerDialog> createState() => _FullColorPickerDialogState();
+}
+
+class _FullColorPickerDialogState extends State<_FullColorPickerDialog> {
+  late double _hue;
+  late double _saturation;
+  late double _value;
+
+  @override
+  void initState() {
+    super.initState();
+    final hsv = HSVColor.fromColor(widget.currentColor);
+    _hue = hsv.hue;
+    _saturation = hsv.saturation;
+    _value = hsv.value;
+  }
+
+  Color get _currentColor => HSVColor.fromAHSV(1.0, _hue, _saturation, _value).toColor();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Custom Color'),
+      content: SizedBox(
+        width: 300,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Color preview
+            Container(
+              width: double.infinity,
+              height: 60,
+              decoration: BoxDecoration(
+                color: _currentColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.neutral300, width: 2),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Hue slider
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Hue'),
+                Slider(
+                  value: _hue,
+                  min: 0,
+                  max: 360,
+                  onChanged: (value) => setState(() => _hue = value),
+                ),
+              ],
+            ),
+            // Saturation slider
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Saturation'),
+                Slider(
+                  value: _saturation,
+                  min: 0,
+                  max: 1,
+                  onChanged: (value) => setState(() => _saturation = value),
+                ),
+              ],
+            ),
+            // Value/Brightness slider
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Brightness'),
+                Slider(
+                  value: _value,
+                  min: 0,
+                  max: 1,
+                  onChanged: (value) => setState(() => _value = value),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _currentColor),
+          child: const Text('Select'),
+        ),
+      ],
     );
   }
 }

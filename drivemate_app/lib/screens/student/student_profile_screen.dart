@@ -31,12 +31,11 @@ class StudentProfileScreen extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       child: Column(
         children: [
-          // Profile Header Card
-          _buildProfileHeader(context),
-          const SizedBox(height: 20),
-          if (studentId == null)
-            _buildNotLinkedCard(context)
-          else
+          if (studentId == null) ...[
+            _buildCompactProfileHeader(context, null),
+            const SizedBox(height: 20),
+            _buildNotLinkedCard(context),
+          ] else
             StreamBuilder<Student?>(
               stream: _firestoreService.streamStudentById(studentId),
               builder: (context, snapshot) {
@@ -45,13 +44,19 @@ class StudentProfileScreen extends StatelessWidget {
                 }
                 final student = snapshot.data;
                 if (student == null) {
-                  return _buildNotLinkedCard(context);
+                  return Column(
+                    children: [
+                      _buildCompactProfileHeader(context, null),
+                      const SizedBox(height: 20),
+                      _buildNotLinkedCard(context),
+                    ],
+                  );
                 }
                 return Column(
                   children: [
-                    _buildBalanceCard(context, student),
+                    _buildCompactProfileHeader(context, student),
                     const SizedBox(height: 16),
-                    _buildEditButton(context, student),
+                    _buildBalanceCard(context, student),
                     const SizedBox(height: 16),
                     _buildHoursAndPayments(context, studentId, student),
                   ],
@@ -63,49 +68,25 @@ class StudentProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildEditButton(BuildContext context, Student student) {
+  Widget _buildCompactProfileHeader(BuildContext context, Student? student) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      child: OutlinedButton.icon(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => StudentProfileEditScreen(
-                profile: profile,
-                student: student,
-              ),
-            ),
-          );
-        },
-        icon: const Icon(Icons.edit_outlined),
-        label: const Text('Edit Profile'),
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProfileHeader(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         gradient: AppTheme.primaryGradient,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withOpacity(0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+            color: AppTheme.primary.withOpacity(0.25),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Column(
+      child: Row(
         children: [
           Container(
-            width: 80,
-            height: 80,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.2),
               shape: BoxShape.circle,
@@ -115,64 +96,106 @@ class StudentProfileScreen extends StatelessWidget {
                 _getInitials(profile.name),
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 28,
+                  fontSize: 18,
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          Text(
-            profile.name,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            profile.email,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.8),
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Row(
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.school_outlined, color: Colors.white, size: 16),
-                SizedBox(width: 6),
                 Text(
-                  'Student',
-                  style: TextStyle(
+                  profile.name,
+                  style: const TextStyle(
                     color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  profile.email,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
                     fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.school_outlined, color: Colors.white, size: 14),
+                      SizedBox(width: 4),
+                      Text(
+                        'Student',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
+          if (student != null)
+            IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => StudentProfileEditScreen(
+                      profile: profile,
+                      student: student,
+                    ),
+                  ),
+                );
+              },
+              icon: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.edit_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+              style: IconButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(44, 44),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
         ],
       ),
     );
   }
 
   Widget _buildNotLinkedCard(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         children: [
@@ -190,12 +213,12 @@ class StudentProfileScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Profile Not Linked',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
-              color: AppTheme.neutral900,
+              color: colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 8),
@@ -204,7 +227,7 @@ class StudentProfileScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
-              color: AppTheme.neutral600,
+              color: colorScheme.onSurfaceVariant,
               height: 1.5,
             ),
           ),
@@ -214,23 +237,24 @@ class StudentProfileScreen extends StatelessWidget {
   }
 
   Widget _buildBalanceCard(BuildContext context, Student student) {
+    final colorScheme = Theme.of(context).colorScheme;
     final balanceColor = student.balanceHours < 0
         ? AppTheme.error
         : student.balanceHours > 0
             ? AppTheme.success
-            : AppTheme.neutral500;
+            : colorScheme.onSurfaceVariant;
     final balanceBgColor = student.balanceHours < 0
         ? AppTheme.errorLight
         : student.balanceHours > 0
             ? AppTheme.successLight
-            : AppTheme.neutral100;
+            : colorScheme.surfaceContainerHighest;
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Row(
         children: [
@@ -238,11 +262,11 @@ class StudentProfileScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Credit Balance',
                   style: TextStyle(
                     fontSize: 13,
-                    color: AppTheme.neutral500,
+                    color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -362,22 +386,23 @@ class StudentProfileScreen extends StatelessWidget {
     required double totalSpent,
     required double? hourlyRate,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Overview',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: AppTheme.neutral900,
+              color: colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 16),
@@ -385,6 +410,7 @@ class StudentProfileScreen extends StatelessWidget {
             children: [
               Expanded(
                 child: _buildStatItem(
+                  context,
                   icon: Icons.event_available_rounded,
                   iconColor: AppTheme.success,
                   iconBgColor: AppTheme.successLight,
@@ -395,6 +421,7 @@ class StudentProfileScreen extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: _buildStatItem(
+                  context,
                   icon: Icons.calendar_month_rounded,
                   iconColor: AppTheme.info,
                   iconBgColor: AppTheme.infoLight,
@@ -409,9 +436,10 @@ class StudentProfileScreen extends StatelessWidget {
             children: [
               Expanded(
                 child: _buildStatItem(
+                  context,
                   icon: Icons.payments_rounded,
                   iconColor: const Color(0xFF8B5CF6),
-                  iconBgColor: const Color(0xFFEDE9FE),
+                  iconBgColor: const Color(0xFF8B5CF6).withOpacity(0.2),
                   label: 'Total Spent',
                   value: '£${totalSpent.toStringAsFixed(0)}',
                 ),
@@ -419,6 +447,7 @@ class StudentProfileScreen extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: _buildStatItem(
+                  context,
                   icon: Icons.speed_rounded,
                   iconColor: AppTheme.secondary,
                   iconBgColor: AppTheme.secondaryLight,
@@ -433,17 +462,19 @@ class StudentProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatItem({
+  Widget _buildStatItem(
+    BuildContext context, {
     required IconData icon,
     required Color iconColor,
     required Color iconBgColor,
     required String label,
     required String value,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.neutral50,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -464,18 +495,18 @@ class StudentProfileScreen extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: AppTheme.neutral500,
+                    color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 Text(
                   value,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.neutral900,
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -493,12 +524,13 @@ class StudentProfileScreen extends StatelessWidget {
     required double bookedHours,
     required double remainingHours,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -519,24 +551,26 @@ class StudentProfileScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              const Text(
+              Text(
                 'Hours Breakdown',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.neutral900,
+                  color: colorScheme.onSurface,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 20),
           _buildHoursRow(
+            context,
             'Total hours purchased',
             totalPaidHours,
-            AppTheme.neutral700,
+            colorScheme.onSurfaceVariant,
           ),
           const SizedBox(height: 12),
           _buildHoursRow(
+            context,
             'Hours completed',
             completedHours,
             AppTheme.success,
@@ -544,16 +578,18 @@ class StudentProfileScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _buildHoursRow(
+            context,
             'Upcoming lessons',
             bookedHours,
             AppTheme.info,
             icon: Icons.event_outlined,
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Divider(),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Divider(color: colorScheme.outlineVariant),
           ),
           _buildHoursRow(
+            context,
             'Available credit',
             remainingHours,
             remainingHours < 0 ? AppTheme.error : AppTheme.primary,
@@ -565,12 +601,14 @@ class StudentProfileScreen extends StatelessWidget {
   }
 
   Widget _buildHoursRow(
+    BuildContext context,
     String label,
     double value,
     Color valueColor, {
     IconData? icon,
     bool isBold = false,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Row(
       children: [
         if (icon != null) ...[
@@ -582,7 +620,7 @@ class StudentProfileScreen extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: 14,
-              color: isBold ? AppTheme.neutral900 : AppTheme.neutral600,
+              color: isBold ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
               fontWeight: isBold ? FontWeight.w600 : FontWeight.w400,
             ),
           ),
@@ -600,11 +638,12 @@ class StudentProfileScreen extends StatelessWidget {
   }
 
   Widget _buildPaymentsHistory(BuildContext context, List<Payment> payments) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -627,12 +666,12 @@ class StudentProfileScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text(
+                Text(
                   'Payment History',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.neutral900,
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -653,7 +692,7 @@ class StudentProfileScreen extends StatelessWidget {
               itemCount: payments.length,
               separatorBuilder: (_, __) => Divider(
                 height: 1,
-                color: AppTheme.neutral200,
+                color: colorScheme.outlineVariant,
               ),
               itemBuilder: (context, index) {
                 final payment = payments[index];
@@ -672,17 +711,18 @@ class StudentProfileScreen extends StatelessWidget {
       'card' => Icons.credit_card_outlined,
       _ => Icons.receipt_outlined,
     };
+    final colorScheme = Theme.of(context).colorScheme;
     final methodColor = switch (payment.method) {
       'cash' => AppTheme.success,
       'bank_transfer' => AppTheme.info,
       'card' => const Color(0xFF8B5CF6),
-      _ => AppTheme.neutral500,
+      _ => colorScheme.onSurfaceVariant,
     };
     final methodBgColor = switch (payment.method) {
       'cash' => AppTheme.successLight,
       'bank_transfer' => AppTheme.infoLight,
       'card' => const Color(0xFFEDE9FE),
-      _ => AppTheme.neutral100,
+      _ => colorScheme.surfaceContainerHighest,
     };
 
     return Padding(
@@ -705,18 +745,18 @@ class StudentProfileScreen extends StatelessWidget {
               children: [
                 Text(
                   '${payment.hoursPurchased.toStringAsFixed(1)} hours purchased',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.neutral900,
+                    color: colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   DateFormat('d MMM yyyy').format(payment.createdAt),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: AppTheme.neutral500,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],

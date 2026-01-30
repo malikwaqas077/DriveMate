@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import '../../models/student.dart';
 import '../../models/user_profile.dart';
 import '../../services/auth_service.dart';
+import '../../services/chat_service.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../chat/conversations_list_screen.dart';
 import 'student_lessons_screen.dart';
 import 'student_profile_screen.dart';
+import 'student_settings_screen.dart';
 
 class StudentHome extends StatefulWidget {
   const StudentHome({super.key, required this.profile});
@@ -20,6 +23,7 @@ class StudentHome extends StatefulWidget {
 class _StudentHomeState extends State<StudentHome> {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
+  final ChatService _chatService = ChatService();
   int _currentIndex = 0;
   Student? _student;
 
@@ -78,7 +82,6 @@ class _StudentHomeState extends State<StudentHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.neutral50,
       appBar: _buildAppBar(context),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 200),
@@ -89,8 +92,8 @@ class _StudentHomeState extends State<StudentHome> {
   }
 
   PreferredSizeWidget _buildAppBar(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return AppBar(
-      backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       title: Row(
@@ -112,12 +115,12 @@ class _StudentHomeState extends State<StudentHome> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'DriveMate',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.neutral900,
+                  color: colorScheme.onSurface,
                   letterSpacing: -0.5,
                 ),
               ),
@@ -126,7 +129,7 @@ class _StudentHomeState extends State<StudentHome> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
-                  color: AppTheme.neutral500,
+                  color: colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -134,21 +137,78 @@ class _StudentHomeState extends State<StudentHome> {
         ],
       ),
       actions: [
+        // Chat button with unread badge
+        StreamBuilder<int>(
+          stream: widget.profile.studentId != null
+              ? _chatService.streamTotalUnreadCountForStudent(
+                  widget.profile.studentId!,
+                )
+              : Stream.value(0),
+          builder: (context, snapshot) {
+            final unreadCount = snapshot.data ?? 0;
+            return Stack(
+              children: [
+                IconButton(
+                  icon: Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ConversationsListScreen(
+                          profile: widget.profile,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                if (unreadCount > 0)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: AppTheme.error,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Center(
+                        child: Text(
+                          unreadCount > 9 ? '9+' : '$unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
         PopupMenuButton<String>(
           icon: Container(
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: AppTheme.neutral100,
+              color: colorScheme.surfaceContainerHighest,
               shape: BoxShape.circle,
             ),
             child: Center(
               child: Text(
                 _getInitials(widget.profile.name),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.primary,
+                  color: colorScheme.primary,
                 ),
               ),
             ),
@@ -162,6 +222,11 @@ class _StudentHomeState extends State<StudentHome> {
             _buildPopupHeader(),
             const PopupMenuDivider(),
             _buildPopupItem(
+              icon: Icons.settings_outlined,
+              label: 'Settings',
+              value: 'settings',
+            ),
+            _buildPopupItem(
               icon: Icons.logout_rounded,
               label: 'Log out',
               value: 'logout',
@@ -169,6 +234,13 @@ class _StudentHomeState extends State<StudentHome> {
             ),
           ],
           onSelected: (value) {
+            if (value == 'settings') {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const StudentSettingsScreen(),
+                ),
+              );
+            }
             if (value == 'logout') {
               _showLogoutConfirmation(context);
             }
@@ -212,9 +284,9 @@ class _StudentHomeState extends State<StudentHome> {
                   children: [
                     Text(
                       widget.profile.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.neutral900,
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontSize: 15,
                       ),
                     ),
@@ -222,7 +294,7 @@ class _StudentHomeState extends State<StudentHome> {
                     Text(
                       widget.profile.email,
                       style: TextStyle(
-                        color: AppTheme.neutral500,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 12,
                       ),
                     ),
@@ -265,13 +337,13 @@ class _StudentHomeState extends State<StudentHome> {
           Icon(
             icon,
             size: 20,
-            color: isDestructive ? AppTheme.error : AppTheme.neutral600,
+            color: isDestructive ? AppTheme.error : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           const SizedBox(width: 12),
           Text(
             label,
             style: TextStyle(
-              color: isDestructive ? AppTheme.error : AppTheme.neutral700,
+              color: isDestructive ? AppTheme.error : Theme.of(context).colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -281,12 +353,13 @@ class _StudentHomeState extends State<StudentHome> {
   }
 
   Widget _buildBottomNav(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: colorScheme.shadow.withOpacity(0.08),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -317,6 +390,8 @@ class _StudentHomeState extends State<StudentHome> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final primary = colorScheme.primary;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -324,7 +399,7 @@ class _StudentHomeState extends State<StudentHome> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary.withOpacity(0.1) : Colors.transparent,
+          color: isSelected ? primary.withOpacity(0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
@@ -333,7 +408,7 @@ class _StudentHomeState extends State<StudentHome> {
           children: [
             Icon(
               isSelected ? item.activeIcon : item.icon,
-              color: isSelected ? AppTheme.primary : AppTheme.neutral500,
+              color: isSelected ? primary : colorScheme.onSurfaceVariant,
               size: 24,
             ),
             AnimatedSize(
@@ -343,10 +418,10 @@ class _StudentHomeState extends State<StudentHome> {
                       padding: const EdgeInsets.only(left: 10),
                       child: Text(
                         item.label,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.primary,
+                          color: primary,
                         ),
                       ),
                     )
@@ -359,6 +434,7 @@ class _StudentHomeState extends State<StudentHome> {
   }
 
   void _showLogoutConfirmation(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -371,23 +447,24 @@ class _StudentHomeState extends State<StudentHome> {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: AppTheme.errorLight,
+                color: colorScheme.errorContainer,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.logout_rounded,
-                color: AppTheme.error,
+                color: colorScheme.onErrorContainer,
                 size: 22,
               ),
             ),
             const SizedBox(width: 16),
-            const Expanded(
-              child: Text('Log out?'),
+            Expanded(
+              child: Text('Log out?', style: TextStyle(color: colorScheme.onSurface)),
             ),
           ],
         ),
-        content: const Text(
+        content: Text(
           'Are you sure you want to log out of DriveMate?',
+          style: TextStyle(color: colorScheme.onSurfaceVariant),
         ),
         actions: [
           TextButton(
@@ -395,9 +472,9 @@ class _StudentHomeState extends State<StudentHome> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              _authService.signOut();
+              await _authService.signOut();
             },
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.error,

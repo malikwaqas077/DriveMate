@@ -4,12 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import 'firestore_service.dart';
-
-/// Background message handler - must be a top-level function
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  debugPrint('[FCM] Background message: ${message.messageId}');
-}
+import 'notification_service.dart' show firebaseMessagingBackgroundHandler, NotificationService;
 
 class FCMService {
   FCMService._();
@@ -25,14 +20,23 @@ class FCMService {
   Future<void> initialize() async {
     debugPrint('[FCM] Initializing FCM service...');
     
-    // Set background message handler
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    // Initialize notification service first
+    await NotificationService.instance.initialize();
+    
+    // Set background message handler (top-level function)
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
     // Request permission
     await _requestPermission();
 
-    // Listen for foreground messages
-    FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+    // Listen for foreground messages - show heads-up notification
+    FirebaseMessaging.onMessage.listen((message) {
+      _handleForegroundMessage(message);
+      // Show local notification with actions for chat messages
+      if (message.data['type'] == 'chat_message') {
+        NotificationService.instance.showNotificationFromMessage(message);
+      }
+    });
 
     // Handle notification tap when app is in background
     debugPrint('[FCM] ===== Setting up onMessageOpenedApp listener =====');

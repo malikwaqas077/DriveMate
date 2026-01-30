@@ -696,10 +696,10 @@ class AppTheme {
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: neutral600, width: 1),
         ),
-        labelStyle: TextStyle(color: neutral400, fontWeight: FontWeight.w500),
-        hintStyle: TextStyle(color: neutral500),
-        prefixIconColor: neutral400,
-        suffixIconColor: neutral400,
+        labelStyle: TextStyle(color: neutral300, fontWeight: FontWeight.w500),
+        hintStyle: TextStyle(color: neutral400),
+        prefixIconColor: neutral300,
+        suffixIconColor: neutral300,
       ),
 
       // Elevated Button Theme
@@ -966,19 +966,19 @@ class AppTheme {
           fontSize: 16,
           fontWeight: FontWeight.w400,
           letterSpacing: 0.15,
-          color: neutral300,
+          color: neutral200,
         ),
         bodyMedium: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w400,
           letterSpacing: 0.25,
-          color: neutral300,
+          color: neutral200,
         ),
         bodySmall: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w400,
           letterSpacing: 0.4,
-          color: neutral400,
+          color: neutral300,
         ),
         labelLarge: TextStyle(
           fontSize: 14,
@@ -990,13 +990,13 @@ class AppTheme {
           fontSize: 12,
           fontWeight: FontWeight.w500,
           letterSpacing: 0.5,
-          color: neutral300,
+          color: neutral200,
         ),
         labelSmall: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w500,
           letterSpacing: 0.5,
-          color: neutral400,
+          color: neutral300,
         ),
       ),
     );

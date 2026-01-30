@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 
 import '../../models/user_profile.dart';
 import '../../services/auth_service.dart';
@@ -28,6 +29,7 @@ class _AuthScreenState extends State<AuthScreen>
   final _signUpName = TextEditingController();
   final _signUpEmail = TextEditingController();
   final _signUpPassword = TextEditingController();
+  final _signUpSchoolName = TextEditingController();
 
   String _role = 'instructor';
   bool _busy = false;
@@ -63,12 +65,26 @@ class _AuthScreenState extends State<AuthScreen>
     _signUpName.dispose();
     _signUpEmail.dispose();
     _signUpPassword.dispose();
+    _signUpSchoolName.dispose();
     super.dispose();
   }
 
+  bool _isPhoneNumber(String input) {
+    final trimmed = input.trim();
+    // Check if it starts with + and contains mostly digits
+    if (trimmed.startsWith('+')) {
+      final digitsOnly = trimmed.replaceAll(RegExp(r'[^\d]'), '');
+      return digitsOnly.length >= 7; // Minimum phone number length
+    }
+    // Check if it's all digits (without +)
+    final digitsOnly = trimmed.replaceAll(RegExp(r'[^\d]'), '');
+    return digitsOnly.length >= 7 && trimmed.length <= 15;
+  }
+
   Future<void> _handleSignIn() async {
-    if (_signInEmail.text.trim().isEmpty) {
-      _showError('Please enter your email address');
+    final identifier = _signInEmail.text.trim();
+    if (identifier.isEmpty) {
+      _showError('Please enter your email address or phone number');
       return;
     }
     if (_signInPassword.text.isEmpty) {
@@ -77,10 +93,18 @@ class _AuthScreenState extends State<AuthScreen>
     }
     setState(() => _busy = true);
     try {
-      await _authService.signIn(
-        email: _signInEmail.text.trim(),
-        password: _signInPassword.text,
-      );
+      // Auto-detect if input is phone number or email
+      if (_isPhoneNumber(identifier)) {
+        await _authService.signInWithPhone(
+          phone: identifier,
+          password: _signInPassword.text,
+        );
+      } else {
+        await _authService.signIn(
+          email: identifier,
+          password: _signInPassword.text,
+        );
+      }
     } on FirebaseAuthException catch (e) {
       _showError(e.message ?? 'Sign in failed');
     } catch (e) {
@@ -88,6 +112,44 @@ class _AuthScreenState extends State<AuthScreen>
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _handleSignInWithGoogle() async {
+    setState(() => _busy = true);
+    try {
+      final credential = await _authService.signInWithGoogle();
+      if (credential?.user == null) return; // User cancelled
+      await _ensureProfileForSocialUser(credential!.user!);
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Google sign in failed');
+    } catch (e) {
+      _showError(e.toString().contains('id token') ? e.toString() : 'Google sign in failed');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _handleSignInWithApple() async {
+    setState(() => _busy = true);
+    try {
+      final credential = await _authService.signInWithApple();
+      if (credential?.user == null) return;
+      await _ensureProfileForSocialUser(credential!.user!);
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Apple sign in failed');
+    } catch (e) {
+      _showError('Apple sign in failed');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// For new Google/Apple sign-in users: do not create profile here.
+  /// AuthGate will show SocialProfileCompletionScreen so they can enter school name and phone.
+  Future<void> _ensureProfileForSocialUser(User user) async {
+    final existing = await _firestoreService.getUserProfile(user.uid);
+    if (existing != null) return;
+    // New social user: leave profile null so AuthGate shows SocialProfileCompletionScreen
   }
 
   Future<void> _handleSignUp() async {
@@ -118,6 +180,16 @@ class _AuthScreenState extends State<AuthScreen>
           email: user.email ?? _signUpEmail.text.trim(),
         );
         await _firestoreService.createUserProfile(profile);
+        
+        // Create school with provided name or default
+        final schoolName = _signUpSchoolName.text.trim();
+        final finalSchoolName = schoolName.isEmpty 
+            ? '${_signUpName.text.trim()} School'
+            : schoolName;
+        await _firestoreService.ensurePersonalSchool(
+          instructor: profile,
+          schoolName: finalSchoolName,
+        );
       }
     } on FirebaseAuthException catch (e) {
       _showError(e.message ?? 'Sign up failed');
@@ -172,9 +244,9 @@ class _AuthScreenState extends State<AuthScreen>
               Expanded(
                 child: Container(
                   width: double.infinity,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
                   ),
                   child: Column(
                     children: [
@@ -263,10 +335,11 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   Widget _buildTabBar() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(top: 12),
       decoration: BoxDecoration(
-        color: AppTheme.neutral100,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(14),
       ),
       padding: const EdgeInsets.all(4),
@@ -308,18 +381,19 @@ class _AuthScreenState extends State<AuthScreen>
     required bool isSelected,
     required VoidCallback onTap,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 14),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
+          color: isSelected ? colorScheme.surface : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: colorScheme.shadow.withOpacity(0.08),
                     blurRadius: 10,
                     offset: const Offset(0, 2),
                   ),
@@ -332,7 +406,7 @@ class _AuthScreenState extends State<AuthScreen>
           style: TextStyle(
             fontSize: 15,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            color: isSelected ? AppTheme.primary : AppTheme.neutral500,
+            color: isSelected ? AppTheme.primary : colorScheme.onSurfaceVariant,
           ),
         ),
       ),
@@ -345,17 +419,18 @@ class _AuthScreenState extends State<AuthScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Email field
-          _buildLabel('Email'),
+          // Email/Phone field
+          _buildLabel('Email or Phone Number'),
           const SizedBox(height: 8),
           TextField(
             controller: _signInEmail,
-            keyboardType: TextInputType.emailAddress,
+            keyboardType: TextInputType.text,
             textInputAction: TextInputAction.next,
             enabled: !_busy,
             decoration: _buildInputDecoration(
-              hintText: 'you@example.com',
-              prefixIcon: Icons.email_outlined,
+              context,
+              hintText: 'you@example.com or +1234567890',
+              prefixIcon: Icons.person_outline_rounded,
             ),
           ),
           const SizedBox(height: 20),
@@ -369,6 +444,7 @@ class _AuthScreenState extends State<AuthScreen>
             enabled: !_busy,
             onSubmitted: (_) => _handleSignIn(),
             decoration: _buildInputDecoration(
+              context,
               hintText: 'Enter your password',
               prefixIcon: Icons.lock_outline_rounded,
               suffixIcon: IconButton(
@@ -376,7 +452,7 @@ class _AuthScreenState extends State<AuthScreen>
                   _obscureSignInPassword
                       ? Icons.visibility_outlined
                       : Icons.visibility_off_outlined,
-                  color: AppTheme.neutral500,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 onPressed: () {
                   setState(() {
@@ -394,6 +470,19 @@ class _AuthScreenState extends State<AuthScreen>
             isLoading: _busy,
           ),
           const SizedBox(height: 20),
+          Text(
+            'Added by your school or instructor? Use email/phone and password above.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildSocialDivider(),
+          const SizedBox(height: 20),
+          _buildSocialSignInButtons(),
+          const SizedBox(height: 20),
           // Footer
           Center(
             child: TextButton(
@@ -401,10 +490,98 @@ class _AuthScreenState extends State<AuthScreen>
               child: Text(
                 'Forgot your password?',
                 style: TextStyle(
-                  color: AppTheme.neutral600,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w500,
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSocialDivider() {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(child: Divider(color: colorScheme.outlineVariant)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'or continue with',
+            style: TextStyle(
+              fontSize: 13,
+              color: colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        Expanded(child: Divider(color: colorScheme.outlineVariant)),
+      ],
+    );
+  }
+
+  bool get _isAppleSignInAvailable {
+    if (kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS;
+  }
+
+  Widget _buildSocialSignInButtons() {
+    return _isAppleSignInAvailable
+        ? Row(
+            children: [
+              Expanded(
+                child: _buildOutlinedSocialButton(
+                  icon: Icons.g_mobiledata_rounded,
+                  label: 'Google',
+                  onPressed: _busy ? null : _handleSignInWithGoogle,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildOutlinedSocialButton(
+                  icon: Icons.apple_rounded,
+                  label: 'Apple',
+                  onPressed: _busy ? null : _handleSignInWithApple,
+                ),
+              ),
+            ],
+          )
+        : _buildOutlinedSocialButton(
+            icon: Icons.g_mobiledata_rounded,
+            label: 'Continue with Google',
+            onPressed: _busy ? null : _handleSignInWithGoogle,
+          );
+  }
+
+  Widget _buildOutlinedSocialButton({
+    required IconData icon,
+    required String label,
+    VoidCallback? onPressed,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: colorScheme.onSurface,
+        side: BorderSide(color: colorScheme.outlineVariant),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 22, color: colorScheme.onSurface),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -427,6 +604,7 @@ class _AuthScreenState extends State<AuthScreen>
             textInputAction: TextInputAction.next,
             enabled: !_busy,
             decoration: _buildInputDecoration(
+              context,
               hintText: 'John Doe',
               prefixIcon: Icons.person_outline_rounded,
             ),
@@ -441,6 +619,7 @@ class _AuthScreenState extends State<AuthScreen>
             textInputAction: TextInputAction.next,
             enabled: !_busy,
             decoration: _buildInputDecoration(
+              context,
               hintText: 'you@example.com',
               prefixIcon: Icons.email_outlined,
             ),
@@ -455,6 +634,7 @@ class _AuthScreenState extends State<AuthScreen>
             textInputAction: TextInputAction.next,
             enabled: !_busy,
             decoration: _buildInputDecoration(
+              context,
               hintText: 'Create a password',
               prefixIcon: Icons.lock_outline_rounded,
               suffixIcon: IconButton(
@@ -462,7 +642,7 @@ class _AuthScreenState extends State<AuthScreen>
                   _obscureSignUpPassword
                       ? Icons.visibility_outlined
                       : Icons.visibility_off_outlined,
-                  color: AppTheme.neutral500,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 onPressed: () {
                   setState(() {
@@ -473,10 +653,36 @@ class _AuthScreenState extends State<AuthScreen>
             ),
           ),
           const SizedBox(height: 20),
-          // Role selector
-          _buildLabel('I am a...'),
-          const SizedBox(height: 12),
-          _buildRoleSelector(),
+          // School Name field (optional)
+          Row(
+            children: [
+              _buildLabel('School Name'),
+              const SizedBox(width: 8),
+              Text(
+                '(Optional)',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _signUpSchoolName,
+            textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.done,
+            enabled: !_busy,
+            decoration: _buildInputDecoration(
+              context,
+              hintText: 'e.g., ABC Driving School',
+              prefixIcon: Icons.school_outlined,
+            ).copyWith(
+              helperText: 'Leave empty to use "[Your Name] School"',
+              helperMaxLines: 2,
+            ),
+          ),
           const SizedBox(height: 32),
           // Sign Up Button
           _buildPrimaryButton(
@@ -484,6 +690,10 @@ class _AuthScreenState extends State<AuthScreen>
             onPressed: _busy ? null : _handleSignUp,
             isLoading: _busy,
           ),
+          const SizedBox(height: 24),
+          _buildSocialDivider(),
+          const SizedBox(height: 20),
+          _buildSocialSignInButtons(),
           const SizedBox(height: 16),
           // Terms
           Text(
@@ -491,7 +701,7 @@ class _AuthScreenState extends State<AuthScreen>
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,
-              color: AppTheme.neutral500,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -500,37 +710,40 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   Widget _buildLabel(String text) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Text(
       text,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        color: AppTheme.neutral700,
+        color: colorScheme.onSurface,
       ),
     );
   }
 
-  InputDecoration _buildInputDecoration({
+  InputDecoration _buildInputDecoration(
+    BuildContext context, {
     required String hintText,
     required IconData prefixIcon,
     Widget? suffixIcon,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return InputDecoration(
       hintText: hintText,
-      hintStyle: TextStyle(color: AppTheme.neutral400),
-      prefixIcon: Icon(prefixIcon, color: AppTheme.neutral500),
+      hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+      prefixIcon: Icon(prefixIcon, color: colorScheme.onSurfaceVariant),
       suffixIcon: suffixIcon,
       filled: true,
-      fillColor: AppTheme.neutral100,
+      fillColor: colorScheme.surfaceContainerHighest,
       isDense: false,
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: AppTheme.neutral200, width: 1),
+        borderSide: BorderSide(color: colorScheme.outlineVariant, width: 1),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: AppTheme.neutral200, width: 1),
+        borderSide: BorderSide(color: colorScheme.outlineVariant, width: 1),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
@@ -538,92 +751,7 @@ class _AuthScreenState extends State<AuthScreen>
       ),
       disabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: AppTheme.neutral200, width: 1),
-      ),
-    );
-  }
-
-  Widget _buildRoleSelector() {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildRoleOption(
-            label: 'Instructor',
-            value: 'instructor',
-            icon: Icons.school_outlined,
-            description: 'Teach driving lessons',
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _buildRoleOption(
-            label: 'Student',
-            value: 'student',
-            icon: Icons.person_outline_rounded,
-            description: 'Learn to drive',
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildRoleOption({
-    required String label,
-    required String value,
-    required IconData icon,
-    required String description,
-  }) {
-    final isSelected = _role == value;
-    return GestureDetector(
-      onTap: _busy ? null : () => setState(() => _role = value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary.withOpacity(0.08) : AppTheme.neutral50,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSelected ? AppTheme.primary : AppTheme.neutral200,
-            width: isSelected ? 2 : 1,
-          ),
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppTheme.primary.withOpacity(0.15)
-                    : AppTheme.neutral200,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                icon,
-                color: isSelected ? AppTheme.primary : AppTheme.neutral500,
-                size: 22,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: isSelected ? AppTheme.primary : AppTheme.neutral700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              description,
-              style: TextStyle(
-                fontSize: 11,
-                color: AppTheme.neutral500,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+        borderSide: BorderSide(color: colorScheme.outlineVariant, width: 1),
       ),
     );
   }
@@ -633,6 +761,7 @@ class _AuthScreenState extends State<AuthScreen>
     required VoidCallback? onPressed,
     bool isLoading = false,
   }) {
+    final onPrimary = Theme.of(context).colorScheme.onPrimary;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       height: 56,
@@ -640,17 +769,17 @@ class _AuthScreenState extends State<AuthScreen>
         onPressed: onPressed,
         style: FilledButton.styleFrom(
           backgroundColor: AppTheme.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: onPrimary,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
           elevation: 0,
         ),
         child: isLoading
-            ? const LoadingIndicator(
+            ? LoadingIndicator(
                 size: 22,
                 strokeWidth: 2.5,
-                color: Colors.white,
+                color: onPrimary,
               )
             : Text(
                 label,

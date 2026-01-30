@@ -25,8 +25,11 @@ class PaymentsScreen extends StatelessWidget {
         return Icons.account_balance_outlined;
       case 'card':
         return Icons.credit_card_outlined;
-      default:
+      case 'other':
         return Icons.receipt_outlined;
+      default:
+        // Custom payment methods use the default icon
+        return Icons.payments_outlined;
     }
   }
 
@@ -38,8 +41,11 @@ class PaymentsScreen extends StatelessWidget {
         return AppTheme.info;
       case 'card':
         return const Color(0xFF8B5CF6);
-      default:
+      case 'other':
         return AppTheme.neutral500;
+      default:
+        // Custom payment methods use primary color
+        return AppTheme.primary;
     }
   }
 
@@ -51,8 +57,11 @@ class PaymentsScreen extends StatelessWidget {
         return AppTheme.infoLight;
       case 'card':
         return const Color(0xFFEDE9FE);
-      default:
+      case 'other':
         return AppTheme.neutral100;
+      default:
+        // Custom payment methods use primary light color
+        return AppTheme.primaryLight;
     }
   }
 
@@ -64,9 +73,38 @@ class PaymentsScreen extends StatelessWidget {
         return 'Bank Transfer';
       case 'card':
         return 'Card';
-      default:
+      case 'other':
         return 'Other';
+      default:
+        // Check if it's a custom payment method
+        final customMethods = instructor.instructorSettings?.customPaymentMethods ?? [];
+        try {
+          final customMethod = customMethods.firstWhere((m) => m.id == method);
+          return customMethod.label;
+        } catch (_) {
+          return method.replaceAll('_', ' ').isNotEmpty
+              ? method.replaceAll('_', ' ')
+              : 'Other';
+        }
     }
+  }
+
+  List<Map<String, dynamic>> _getAllPaymentMethods() {
+    final builtInMethods = [
+      {'id': 'cash', 'label': 'Cash', 'icon': Icons.payments_outlined},
+      {'id': 'bank_transfer', 'label': 'Bank', 'icon': Icons.account_balance_outlined},
+      {'id': 'card', 'label': 'Card', 'icon': Icons.credit_card_outlined},
+      {'id': 'other', 'label': 'Other', 'icon': Icons.receipt_outlined},
+    ];
+    
+    final customMethods = instructor.instructorSettings?.customPaymentMethods ?? [];
+    final customMethodList = customMethods.map((m) => {
+      'id': m.id,
+      'label': m.label,
+      'icon': Icons.payments_outlined,
+    }).toList();
+    
+    return [...builtInMethods, ...customMethodList];
   }
 
   @override
@@ -95,7 +133,6 @@ class PaymentsScreen extends StatelessWidget {
             final totalHours = payments.fold<double>(0, (sum, p) => sum + p.hoursPurchased);
 
             return Scaffold(
-              backgroundColor: AppTheme.neutral50,
               body: Column(
                 children: [
                   // Summary Card
@@ -342,12 +379,13 @@ class PaymentsScreen extends StatelessWidget {
     String? schoolId,
   ) {
     final name = studentMap[payment.studentId] ?? 'Student';
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.neutral200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Material(
         color: Colors.transparent,
@@ -380,10 +418,10 @@ class PaymentsScreen extends StatelessWidget {
                     children: [
                       Text(
                         name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.neutral900,
+                          color: colorScheme.onSurface,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -410,14 +448,14 @@ class PaymentsScreen extends StatelessWidget {
                                 ? Icons.business_outlined
                                 : Icons.person_outline,
                             size: 14,
-                            color: AppTheme.neutral500,
+                            color: colorScheme.onSurfaceVariant,
                           ),
                           const SizedBox(width: 4),
                           Text(
                             payment.paidTo == 'school' ? 'School' : 'Instructor',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.neutral500,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -440,16 +478,16 @@ class PaymentsScreen extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       '${payment.hoursPurchased.toStringAsFixed(1)}h',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.neutral500,
+                        color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(width: 8),
                 PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert_rounded, color: AppTheme.neutral400, size: 20),
+                  icon: Icon(Icons.more_vert_rounded, color: colorScheme.onSurfaceVariant, size: 20),
                   position: PopupMenuPosition.under,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   onSelected: (value) {
@@ -501,6 +539,9 @@ class PaymentsScreen extends StatelessWidget {
     String method = 'cash';
     String paidTo = 'instructor';
     bool saving = false;
+    final customMethods = List<CustomPaymentMethod>.from(
+      instructor.instructorSettings?.customPaymentMethods ?? [],
+    );
 
     await showModalBottomSheet<void>(
       context: context,
@@ -509,11 +550,12 @@ class PaymentsScreen extends StatelessWidget {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final colorScheme = Theme.of(context).colorScheme;
             return Container(
               height: MediaQuery.of(context).size.height * 0.75,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: Column(
                 children: [
@@ -521,7 +563,7 @@ class PaymentsScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.fromLTRB(24, 16, 16, 16),
                     decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: AppTheme.neutral200)),
+                      border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
@@ -535,7 +577,7 @@ class PaymentsScreen extends StatelessWidget {
                           child: const Icon(Icons.add_card_rounded, color: AppTheme.success),
                         ),
                         const SizedBox(width: 16),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -544,12 +586,12 @@ class PaymentsScreen extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w600,
-                                  color: AppTheme.neutral900,
+                                  color: colorScheme.onSurface,
                                 ),
                               ),
                               Text(
                                 'Record a new payment',
-                                style: TextStyle(fontSize: 13, color: AppTheme.neutral500),
+                                style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -568,12 +610,12 @@ class PaymentsScreen extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Student',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: AppTheme.neutral700,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -603,12 +645,12 @@ class PaymentsScreen extends StatelessWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'Amount (£)',
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: AppTheme.neutral700,
+                                        color: colorScheme.onSurfaceVariant,
                                       ),
                                     ),
                                     const SizedBox(height: 8),
@@ -628,12 +670,12 @@ class PaymentsScreen extends StatelessWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'Hours',
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: AppTheme.neutral700,
+                                        color: colorScheme.onSurfaceVariant,
                                       ),
                                     ),
                                     const SizedBox(height: 8),
@@ -651,12 +693,12 @@ class PaymentsScreen extends StatelessWidget {
                             ],
                           ),
                           const SizedBox(height: 20),
-                          const Text(
+                          Text(
                             'Payment Method',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: AppTheme.neutral700,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -672,15 +714,28 @@ class PaymentsScreen extends StatelessWidget {
                                   (val) => setDialogState(() => method = val)),
                               _buildMethodChip('other', 'Other', Icons.receipt_outlined, method,
                                   (val) => setDialogState(() => method = val)),
+                              ...customMethods.map((m) => _buildMethodChip(
+                                m.id, m.label, Icons.payments_outlined, method,
+                                (val) => setDialogState(() => method = val),
+                              )),
+                              _buildAddNewPaymentMethodChip(
+                                context,
+                                colorScheme,
+                                customMethods,
+                                instructor,
+                                setDialogState,
+                                (newId) => method = newId,
+                                _firestoreService,
+                              ),
                             ],
                           ),
                           const SizedBox(height: 20),
-                          const Text(
+                          Text(
                             'Paid To',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: AppTheme.neutral700,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -715,8 +770,8 @@ class PaymentsScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border(top: BorderSide(color: AppTheme.neutral200)),
+                      color: colorScheme.surface,
+                      border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
@@ -757,7 +812,7 @@ class PaymentsScreen extends StatelessWidget {
                                     }
                                   },
                             child: saving
-                                ? const LoadingIndicator(size: 20, color: Colors.white)
+                                ? LoadingIndicator(size: 20, color: colorScheme.onPrimary)
                                 : const Text('Save Payment'),
                           ),
                         ),
@@ -817,6 +872,89 @@ class PaymentsScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildAddNewPaymentMethodChip(
+    BuildContext context,
+    ColorScheme colorScheme,
+    List<CustomPaymentMethod> customMethods,
+    UserProfile instructor,
+    StateSetter setDialogState,
+    void Function(String newId) onAdded,
+    FirestoreService firestoreService,
+  ) {
+    return GestureDetector(
+      onTap: () async {
+        final labelController = TextEditingController();
+        final label = await showDialog<String>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('New payment method'),
+            content: TextField(
+              controller: labelController,
+              decoration: const InputDecoration(
+                labelText: 'Method name',
+                hintText: 'e.g. PayPal, Venmo',
+              ),
+              autofocus: true,
+              onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, labelController.text.trim()),
+                child: const Text('Add'),
+              ),
+            ],
+          ),
+        );
+        if (label == null || label.isEmpty) return;
+        final id = label.toLowerCase().replaceAll(' ', '_').replaceAll(RegExp(r'[^a-z0-9_]'), '');
+        if (id.isEmpty) return;
+        if (customMethods.any((m) => m.id == id)) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('This payment method already exists')),
+            );
+          }
+          return;
+        }
+        customMethods.add(CustomPaymentMethod(id: id, label: label));
+        final current = instructor.instructorSettings;
+        final newSettings = InstructorSettings(
+          cancellationRules: current?.cancellationRules,
+          reminderHoursBefore: current?.reminderHoursBefore,
+          notificationSettings: current?.notificationSettings,
+          defaultNavigationApp: current?.defaultNavigationApp,
+          lessonColors: current?.lessonColors,
+          defaultCalendarView: current?.defaultCalendarView,
+          customPaymentMethods: customMethods,
+          customLessonTypes: current?.customLessonTypes,
+        );
+        await firestoreService.updateUserProfile(instructor.id, {'instructorSettings': newSettings.toMap()});
+        onAdded(id);
+        setDialogState(() {});
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: colorScheme.outline, width: 1.5, style: BorderStyle.solid),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_rounded, size: 18, color: colorScheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              'Add new',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: colorScheme.primary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPaidToOption(
     String value,
     String label,
@@ -866,19 +1004,23 @@ class PaymentsScreen extends StatelessWidget {
     String method = payment.method;
     String paidTo = payment.paidTo;
     bool saving = false;
+    final customMethods = List<CustomPaymentMethod>.from(
+      instructor.instructorSettings?.customPaymentMethods ?? [],
+    );
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Container(
               height: MediaQuery.of(context).size.height * 0.6,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: Column(
                 children: [
@@ -886,7 +1028,7 @@ class PaymentsScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.fromLTRB(24, 16, 16, 16),
                     decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: AppTheme.neutral200)),
+                      border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
@@ -903,7 +1045,7 @@ class PaymentsScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 16),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -912,12 +1054,12 @@ class PaymentsScreen extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w600,
-                                  color: AppTheme.neutral900,
+                                  color: colorScheme.onSurface,
                                 ),
                               ),
                               Text(
                                 'Update payment details',
-                                style: TextStyle(fontSize: 13, color: AppTheme.neutral500),
+                                style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -979,6 +1121,19 @@ class PaymentsScreen extends StatelessWidget {
                                   (val) => setDialogState(() => method = val)),
                               _buildMethodChip('other', 'Other', Icons.receipt_outlined, method,
                                   (val) => setDialogState(() => method = val)),
+                              ...customMethods.map((m) => _buildMethodChip(
+                                m.id, m.label, Icons.payments_outlined, method,
+                                (val) => setDialogState(() => method = val),
+                              )),
+                              _buildAddNewPaymentMethodChip(
+                                context,
+                                colorScheme,
+                                customMethods,
+                                instructor,
+                                setDialogState,
+                                (newId) => method = newId,
+                                _firestoreService,
+                              ),
                             ],
                           ),
                           const SizedBox(height: 20),
@@ -1018,8 +1173,8 @@ class PaymentsScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border(top: BorderSide(color: AppTheme.neutral200)),
+                      color: colorScheme.surface,
+                      border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
                     ),
                     child: Row(
                       children: [
@@ -1060,7 +1215,7 @@ class PaymentsScreen extends StatelessWidget {
                                     }
                                   },
                             child: saving
-                                ? const LoadingIndicator(size: 20, color: Colors.white)
+                                ? LoadingIndicator(size: 20, color: colorScheme.onPrimary)
                                 : const Text('Save Changes'),
                           ),
                         ),

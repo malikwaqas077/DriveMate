@@ -88,7 +88,8 @@ class _EmptyViewState extends State<EmptyView>
     }
   }
 
-  Color _getIconBackgroundColor() {
+  Color _getIconBackgroundColor(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     switch (widget.type) {
       case EmptyViewType.students:
         return AppTheme.infoLight;
@@ -97,15 +98,16 @@ class _EmptyViewState extends State<EmptyView>
       case EmptyViewType.payments:
         return AppTheme.successLight;
       case EmptyViewType.calendar:
-        return const Color(0xFFE0E7FF);
+        return const Color(0xFF4F46E5).withOpacity(0.15);
       case EmptyViewType.reports:
-        return const Color(0xFFFCE7F3);
+        return const Color(0xFFEC4899).withOpacity(0.15);
       case EmptyViewType.generic:
-        return AppTheme.neutral100;
+        return colorScheme.surfaceContainerHighest;
     }
   }
 
-  Color _getIconColor() {
+  Color _getIconColor(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     switch (widget.type) {
       case EmptyViewType.students:
         return AppTheme.info;
@@ -118,12 +120,13 @@ class _EmptyViewState extends State<EmptyView>
       case EmptyViewType.reports:
         return const Color(0xFFEC4899);
       case EmptyViewType.generic:
-        return AppTheme.neutral500;
+        return colorScheme.onSurfaceVariant;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Center(
       child: FadeTransition(
         opacity: _fadeAnimation,
@@ -139,7 +142,7 @@ class _EmptyViewState extends State<EmptyView>
                   width: 120,
                   height: 120,
                   decoration: BoxDecoration(
-                    color: _getIconBackgroundColor(),
+                    color: _getIconBackgroundColor(context),
                     shape: BoxShape.circle,
                   ),
                   child: Stack(
@@ -153,7 +156,7 @@ class _EmptyViewState extends State<EmptyView>
                           width: 16,
                           height: 16,
                           decoration: BoxDecoration(
-                            color: _getIconColor().withOpacity(0.2),
+                            color: _getIconColor(context).withOpacity(0.2),
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -165,7 +168,7 @@ class _EmptyViewState extends State<EmptyView>
                           width: 10,
                           height: 10,
                           decoration: BoxDecoration(
-                            color: _getIconColor().withOpacity(0.15),
+                            color: _getIconColor(context).withOpacity(0.15),
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -174,7 +177,7 @@ class _EmptyViewState extends State<EmptyView>
                       Icon(
                         _getIcon(),
                         size: 48,
-                        color: _getIconColor(),
+                        color: _getIconColor(context),
                       ),
                     ],
                   ),
@@ -185,7 +188,7 @@ class _EmptyViewState extends State<EmptyView>
                   widget.message,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.neutral800,
+                        color: colorScheme.onSurface,
                       ),
                   textAlign: TextAlign.center,
                 ),
@@ -194,7 +197,7 @@ class _EmptyViewState extends State<EmptyView>
                   Text(
                     widget.subtitle!,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppTheme.neutral500,
+                          color: colorScheme.onSurfaceVariant,
                         ),
                     textAlign: TextAlign.center,
                   ),
@@ -235,6 +238,7 @@ class InlineEmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
       child: Column(
@@ -243,13 +247,13 @@ class InlineEmptyView extends StatelessWidget {
           Icon(
             icon ?? Icons.inbox_outlined,
             size: 40,
-            color: AppTheme.neutral400,
+            color: colorScheme.onSurfaceVariant,
           ),
           const SizedBox(height: 12),
           Text(
             message,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.neutral500,
+                  color: colorScheme.onSurfaceVariant,
                 ),
             textAlign: TextAlign.center,
           ),

@@ -1,13 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduleLessonReminders = exports.onCancellationRequestResponded = exports.onCancellationRequestCreated = exports.onReflectionAdded = exports.onLessonCreated = void 0;
+exports.onMessageCreated = exports.onInstructorNotificationCreated = exports.scheduleLessonReminders = exports.onCancellationRequestResponded = exports.onCancellationRequestCreated = exports.onReflectionAdded = exports.onLessonCreated = void 0;
 const admin = require("firebase-admin");
 const functions = require("firebase-functions");
 admin.initializeApp();
 const db = admin.firestore();
 const messaging = admin.messaging();
 // Helper function to send push notification
-async function sendPushNotification(fcmToken, title, body, data) {
+async function sendPushNotification(fcmToken, title, body, data, isChatMessage = false) {
     try {
         // Convert all data values to strings (FCM requirement)
         const stringData = {};
@@ -16,29 +16,62 @@ async function sendPushNotification(fcmToken, title, body, data) {
                 stringData[key] = String(value);
             }
         }
-        await messaging.send({
-            token: fcmToken,
-            notification: {
-                title,
-                body,
-            },
-            data: stringData,
-            android: {
-                notification: {
-                    sound: "default",
-                    clickAction: "FLUTTER_NOTIFICATION_CLICK",
-                    channelId: "default",
+        // For chat messages, send data-only to prevent FCM from auto-displaying notifications
+        // The Flutter app will show the notification with actions using flutter_local_notifications
+        const message = isChatMessage
+            ? {
+                // Data-only message - no notification field at all
+                token: fcmToken,
+                data: Object.assign(Object.assign({}, stringData), { title,
+                    body }),
+                android: {
+                    // Data-only - no notification field, just priority
+                    priority: "high",
                 },
-                priority: "high",
-            },
-            apns: {
-                payload: {
-                    aps: {
-                        sound: "default",
+                apns: {
+                    payload: {
+                        aps: {
+                            // Data-only - contentAvailable tells iOS to wake app
+                            contentAvailable: true,
+                        },
                     },
                 },
-            },
-        });
+            }
+            : {
+                // Regular notification message
+                token: fcmToken,
+                notification: {
+                    title,
+                    body,
+                },
+                data: stringData,
+                android: {
+                    notification: {
+                        sound: "default",
+                        clickAction: "FLUTTER_NOTIFICATION_CLICK",
+                        channelId: "default",
+                        priority: "high",
+                        visibility: "public",
+                        defaultSound: true,
+                        defaultVibrateTimings: true,
+                    },
+                    priority: "high",
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: "default",
+                            alert: {
+                                title,
+                                body,
+                            },
+                            badge: 1,
+                        },
+                    },
+                },
+            };
+        // Note: Notification actions are handled in Flutter app using flutter_local_notifications
+        await messaging.send(message);
         functions.logger.info(`Push sent: ${title} to token ${fcmToken.slice(0, 10)}...`);
     }
     catch (error) {
@@ -299,5 +332,163 @@ exports.scheduleLessonReminders = functions.pubsub
         functions.logger.info(`Sent reminder to student ${studentId} for lesson at ${startAt.toISOString()}`);
     }
     functions.logger.info(`Sent ${processedStudents.size} lesson reminders`);
+});
+// Helper to get instructor name
+async function getInstructorName(instructorId) {
+    var _a;
+    const instructorDoc = await db.collection("users").doc(instructorId).get();
+    if (!instructorDoc.exists)
+        return "Your instructor";
+    return ((_a = instructorDoc.data()) === null || _a === void 0 ? void 0 : _a.name) || "Your instructor";
+}
+/**
+ * Triggered when an instructor notification is created
+ * Sends push notification to the student
+ */
+exports.onInstructorNotificationCreated = functions.firestore
+    .document("instructor_notifications/{notificationId}")
+    .onCreate(async (snap, context) => {
+    const data = snap.data();
+    const notificationId = context.params.notificationId;
+    const instructorId = data.instructorId;
+    const studentId = data.studentId;
+    const lessonId = data.lessonId;
+    const notificationType = data.notificationType; // 'on_way' or 'arrived'
+    if (!instructorId || !studentId || !lessonId || !notificationType) {
+        functions.logger.error(`Invalid notification data: ${JSON.stringify(data)}`);
+        return;
+    }
+    // Get student's user profile for FCM token
+    const userQuery = await db
+        .collection("users")
+        .where("studentId", "==", studentId)
+        .limit(1)
+        .get();
+    if (userQuery.empty) {
+        functions.logger.info(`No user profile found for student ${studentId}`);
+        await db.collection("instructor_notifications").doc(notificationId).delete();
+        return;
+    }
+    const userDoc = userQuery.docs[0];
+    const fcmToken = userDoc.data().fcmToken;
+    if (!fcmToken) {
+        functions.logger.info(`No FCM token for student ${studentId}`);
+        await db.collection("instructor_notifications").doc(notificationId).delete();
+        return;
+    }
+    // Get instructor name
+    const instructorName = await getInstructorName(instructorId);
+    // Set notification title and body based on type
+    let title = "";
+    let body = "";
+    if (notificationType === "on_way") {
+        title = "Instructor On Way";
+        body = `${instructorName} is on their way to you`;
+    }
+    else if (notificationType === "arrived") {
+        title = "Instructor Arrived";
+        body = `${instructorName} has arrived`;
+    }
+    else {
+        functions.logger.error(`Unknown notification type: ${notificationType}`);
+        await db.collection("instructor_notifications").doc(notificationId).delete();
+        return;
+    }
+    // Send notification
+    await sendPushNotification(fcmToken, title, body, {
+        type: "instructor_notification",
+        notificationType: notificationType,
+        lessonId: lessonId,
+        instructorId: instructorId,
+    });
+    // Delete the notification document after sending
+    await db.collection("instructor_notifications").doc(notificationId).delete();
+    functions.logger.info(`Sent ${notificationType} notification to student ${studentId} from instructor ${instructorId}`);
+});
+/**
+ * Triggered when a new message is created in a conversation
+ * Sends push notification to the recipient
+ */
+exports.onMessageCreated = functions.firestore
+    .document("conversations/{conversationId}/messages/{messageId}")
+    .onCreate(async (snapshot, context) => {
+    var _a;
+    const message = snapshot.data();
+    const conversationId = context.params.conversationId;
+    const senderId = message.senderId;
+    const senderRole = message.senderRole;
+    const messageText = message.text || "";
+    if (!senderId || !senderRole || !conversationId) {
+        functions.logger.warn("Message created with missing data");
+        return;
+    }
+    // Get conversation to find recipient
+    const conversationDoc = await db
+        .collection("conversations")
+        .doc(conversationId)
+        .get();
+    if (!conversationDoc.exists) {
+        functions.logger.warn(`Conversation ${conversationId} not found`);
+        return;
+    }
+    const conversation = conversationDoc.data();
+    const instructorId = conversation.instructorId;
+    const studentId = conversation.studentId;
+    // Determine recipient
+    let recipientId = null;
+    if (senderRole === "instructor") {
+        // Instructor sent message, notify student
+        recipientId = studentId;
+    }
+    else {
+        // Student sent message, notify instructor
+        recipientId = instructorId;
+    }
+    if (!recipientId) {
+        functions.logger.warn(`No recipient found for conversation ${conversationId}`);
+        return;
+    }
+    // Get recipient's FCM token
+    let fcmToken = null;
+    if (senderRole === "instructor") {
+        // Student is recipient - find user profile by studentId
+        const userQuery = await db
+            .collection("users")
+            .where("studentId", "==", studentId)
+            .limit(1)
+            .get();
+        if (!userQuery.empty) {
+            fcmToken = ((_a = userQuery.docs[0].data()) === null || _a === void 0 ? void 0 : _a.fcmToken) || null;
+        }
+    }
+    else {
+        // Instructor is recipient - get directly by userId
+        fcmToken = await getUserFcmToken(instructorId);
+    }
+    if (!fcmToken) {
+        functions.logger.info(`No FCM token for recipient ${recipientId}`);
+        return;
+    }
+    // Get sender name
+    let senderName = "";
+    if (senderRole === "instructor") {
+        senderName = await getInstructorName(senderId);
+    }
+    else {
+        senderName = await getStudentName(senderId);
+    }
+    // Truncate message text for notification
+    const truncatedText = messageText.length > 100
+        ? messageText.substring(0, 100) + "..."
+        : messageText;
+    await sendPushNotification(fcmToken, senderName, truncatedText, {
+        type: "chat_message",
+        conversationId: conversationId,
+        messageId: context.params.messageId,
+        senderId: senderId,
+        senderRole: senderRole,
+    }, true // isChatMessage = true for heads-up and actions
+    );
+    functions.logger.info(`Sent chat notification to ${recipientId} from ${senderId} in conversation ${conversationId}`);
 });
 //# sourceMappingURL=index.js.map
