@@ -82,7 +82,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
+                  gradient: context.primaryGradient,
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(

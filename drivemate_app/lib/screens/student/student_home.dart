@@ -102,7 +102,7 @@ class _StudentHomeState extends State<StudentHome> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
+              gradient: context.primaryGradient,
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
@@ -263,7 +263,7 @@ class _StudentHomeState extends State<StudentHome> {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
+                  gradient: context.primaryGradient,
                   shape: BoxShape.circle,
                 ),
                 child: Center(
@@ -473,7 +473,9 @@ class _StudentHomeState extends State<StudentHome> {
           ),
           FilledButton(
             onPressed: () async {
+              final navigator = Navigator.of(context, rootNavigator: true);
               Navigator.pop(context);
+              navigator.popUntil((route) => route.isFirst);
               await _authService.signOut();
             },
             style: FilledButton.styleFrom(

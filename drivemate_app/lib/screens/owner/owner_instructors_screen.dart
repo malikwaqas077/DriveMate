@@ -4,12 +4,14 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../models/access_request.dart';
 import '../../models/school_instructor.dart';
+import '../../models/student.dart';
 import '../../models/user_profile.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/empty_view.dart';
 import '../../widgets/loading_view.dart';
+import 'owner_instructor_detail_screen.dart';
 
 class OwnerInstructorsScreen extends StatelessWidget {
   OwnerInstructorsScreen({super.key, required this.owner});
@@ -105,9 +107,9 @@ class OwnerInstructorsScreen extends StatelessWidget {
                         // List of instructors
                         if (links.isNotEmpty)
                           Expanded(
-                            child: ListView.separated(
+                            child: ListView.builder(
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                               itemCount: links.length,
-                              separatorBuilder: (_, __) => const Divider(height: 1),
                               itemBuilder: (context, index) {
                                 final link = links[index];
                                 final request =
@@ -121,74 +123,35 @@ class OwnerInstructorsScreen extends StatelessWidget {
                                     final name = profile?.name ?? 'Instructor';
                                     final email = profile?.email ?? '';
                                     final status = request?.status ?? 'not requested';
-                                    return ListTile(
-                                      leading: isOwner
-                                          ? Container(
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.primary.withOpacity(0.1),
-                                                borderRadius: BorderRadius.circular(8),
-                                              ),
-                                              child: Icon(
-                                                Icons.person,
-                                                color: AppTheme.primary,
-                                                size: 20,
-                                              ),
-                                            )
-                                          : null,
-                                      title: Row(
-                                        children: [
-                                          Text(name),
-                                          if (isOwner)
-                                            Container(
-                                              margin: const EdgeInsets.only(left: 8),
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 6,
-                                                vertical: 2,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.primary.withOpacity(0.1),
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                'You',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: AppTheme.primary,
+                                    return StreamBuilder<List<Student>>(
+                                      stream: _firestoreService.streamStudents(link.instructorId),
+                                      builder: (context, studentsSnapshot) {
+                                        final students = studentsSnapshot.data ?? [];
+                                        final studentCount = students.length;
+                                        return _InstructorCard(
+                                          name: name,
+                                          email: email,
+                                          studentCount: studentCount,
+                                          feeAmount: link.feeAmount,
+                                          feeFrequency: link.feeFrequency,
+                                          accessStatus: status,
+                                          isOwner: isOwner,
+                                          onTap: () {
+                                            Navigator.of(context).push(
+                                              MaterialPageRoute(
+                                                builder: (_) => OwnerInstructorDetailScreen(
+                                                  owner: owner,
+                                                  link: link,
+                                                  instructorName: name,
+                                                  accessStatus: status,
                                                 ),
                                               ),
-                                            ),
-                                        ],
-                                      ),
-                                      subtitle: Text(
-                                        [
-                                          if (email.isNotEmpty) email,
-                                          'Fee: £${link.feeAmount.toStringAsFixed(2)} / ${link.feeFrequency}',
-                                          'Access: $status',
-                                        ].join(' · '),
-                                      ),
-                                      trailing: isOwner
-                                          ? null
-                                          : PopupMenuButton<String>(
-                                              onSelected: (value) {
-                                                if (value == 'request_access') {
-                                                  _requestAccess(link.instructorId);
-                                                } else if (value == 'edit_fee') {
-                                                  _editFee(context, link);
-                                                }
-                                              },
-                                              itemBuilder: (context) => const [
-                                                PopupMenuItem(
-                                                  value: 'request_access',
-                                                  child: Text('Request access'),
-                                                ),
-                                                PopupMenuItem(
-                                                  value: 'edit_fee',
-                                                  child: Text('Edit fee'),
-                                                ),
-                                              ],
-                                            ),
+                                            );
+                                          },
+                                          onRequestAccess: isOwner ? null : () => _requestAccess(link.instructorId),
+                                          onEditFee: isOwner ? null : () => _editFee(context, link),
+                                        );
+                                      },
                                     );
                                   },
                                 );
@@ -306,119 +269,265 @@ class OwnerInstructorsScreen extends StatelessWidget {
     String? loginEmail;
     String? loginPassword;
 
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Add instructor'),
-              content: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: 'Name'),
-                    ),
-                    TextField(
-                      controller: emailController,
-                      decoration: const InputDecoration(labelText: 'Email'),
-                    ),
-                    TextField(
-                      controller: passwordController,
-                      decoration: const InputDecoration(labelText: 'Temp password'),
-                      obscureText: true,
-                    ),
-                    TextField(
-                      controller: feeController,
-                      decoration: const InputDecoration(labelText: 'Fee amount'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: frequency,
-                      decoration: const InputDecoration(labelText: 'Fee frequency'),
-                      items: const [
-                        DropdownMenuItem(value: 'week', child: Text('Weekly')),
-                        DropdownMenuItem(value: 'month', child: Text('Monthly')),
-                      ],
-                      onChanged: saving
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                setDialogState(() => frequency = value);
-                              }
-                            },
-                    ),
-                  ],
-                ),
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.85,
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
-              actions: [
-                TextButton(
-                  onPressed: saving ? null : () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: saving
-                      ? null
-                      : () async {
-                          final name = nameController.text.trim();
-                          final email = emailController.text.trim();
-                          final password = passwordController.text;
-                          if (name.isEmpty || email.isEmpty || password.isEmpty) {
-                            _showSnack(context, 'All fields are required.');
-                            return;
-                          }
-                          final feeAmount =
-                              double.tryParse(feeController.text) ?? 0;
-                          setDialogState(() => saving = true);
-                          try {
-                            final credential =
-                                await _authService.createInstructorLogin(
-                              email: email,
-                              password: password,
-                            );
-                            final user = credential.user;
-                            if (user != null) {
-                              await _firestoreService.createUserProfile(
-                                UserProfile(
-                                  id: user.uid,
-                                  role: 'instructor',
-                                  name: name,
-                                  email: email,
-                                  schoolId: schoolId,
+              child: Column(
+                children: [
+                  // Header
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: colorScheme.outlineVariant),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: colorScheme.primary.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(
+                            Icons.person_add_outlined,
+                            color: colorScheme.primary,
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Add instructor',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                  color: colorScheme.onSurface,
                                 ),
-                              );
-                              await _firestoreService.addInstructorToSchool(
-                                schoolId: schoolId,
-                                instructorId: user.uid,
-                                feeAmount: feeAmount,
-                                feeFrequency: frequency,
-                              );
-                              loginEmail = email;
-                              loginPassword = password;
-                            }
-                          } catch (error) {
-                            _showSnack(
-                              context,
-                              'Failed to add instructor: $error',
-                            );
-                          } finally {
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                            }
-                          }
-                        },
-                  child: saving
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save'),
-                ),
-              ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Create a new instructor account',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 28),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Form
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Required information',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: nameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Name',
+                              hintText: 'Instructor full name',
+                              prefixIcon: Icon(Icons.person_outline),
+                            ),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(height: 20),
+                          TextField(
+                            controller: emailController,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              hintText: 'instructor@example.com',
+                              prefixIcon: Icon(Icons.email_outlined),
+                            ),
+                            keyboardType: TextInputType.emailAddress,
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(height: 20),
+                          TextField(
+                            controller: passwordController,
+                            decoration: const InputDecoration(
+                              labelText: 'Temporary password',
+                              hintText: 'Share with instructor to log in',
+                              prefixIcon: Icon(Icons.lock_outline),
+                              helperText: 'Instructor can change this after first login',
+                            ),
+                            obscureText: true,
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Fee settings',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: feeController,
+                            decoration: const InputDecoration(
+                              labelText: 'Fee amount (£)',
+                              hintText: '0.00',
+                              prefixIcon: Icon(Icons.payments_outlined),
+                            ),
+                            keyboardType:
+                                const TextInputType.numberWithOptions(decimal: true),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(height: 20),
+                          DropdownButtonFormField<String>(
+                            value: frequency,
+                            decoration: const InputDecoration(
+                              labelText: 'Fee frequency',
+                              prefixIcon: Icon(Icons.calendar_today_outlined),
+                            ),
+                            style: const TextStyle(fontSize: 16),
+                            items: const [
+                              DropdownMenuItem(value: 'week', child: Text('Weekly')),
+                              DropdownMenuItem(value: 'month', child: Text('Monthly')),
+                            ],
+                            onChanged: saving
+                                ? null
+                                : (value) {
+                                    if (value != null) {
+                                      setDialogState(() => frequency = value);
+                                    }
+                                  },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Footer buttons
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: colorScheme.outlineVariant),
+                      ),
+                    ),
+                    child: SafeArea(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: saving ? null : () => Navigator.pop(context),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            flex: 2,
+                            child: FilledButton(
+                              onPressed: saving
+                                  ? null
+                                  : () async {
+                                      final name = nameController.text.trim();
+                                      final email = emailController.text.trim();
+                                      final password = passwordController.text;
+                                      if (name.isEmpty || email.isEmpty || password.isEmpty) {
+                                        _showSnack(context, 'All fields are required.');
+                                        return;
+                                      }
+                                      final feeAmount =
+                                          double.tryParse(feeController.text) ?? 0;
+                                      setDialogState(() => saving = true);
+                                      try {
+                                        final credential =
+                                            await _authService.createInstructorLogin(
+                                          email: email,
+                                          password: password,
+                                        );
+                                        final user = credential.user;
+                                        if (user != null) {
+                                          await _firestoreService.createUserProfile(
+                                            UserProfile(
+                                              id: user.uid,
+                                              role: 'instructor',
+                                              name: name,
+                                              email: email,
+                                              schoolId: schoolId,
+                                            ),
+                                          );
+                                          await _firestoreService.addInstructorToSchool(
+                                            schoolId: schoolId,
+                                            instructorId: user.uid,
+                                            feeAmount: feeAmount,
+                                            feeFrequency: frequency,
+                                          );
+                                          loginEmail = email;
+                                          loginPassword = password;
+                                        }
+                                      } catch (error) {
+                                        _showSnack(
+                                          context,
+                                          'Failed to add instructor: $error',
+                                        );
+                                        setDialogState(() => saving = false);
+                                        return;
+                                      }
+                                      if (context.mounted) {
+                                        Navigator.pop(context);
+                                      }
+                                    },
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                              child: saving
+                                  ? SizedBox(
+                                      height: 24,
+                                      width: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: colorScheme.onPrimary,
+                                      ),
+                                    )
+                                  : const Text('Add instructor'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             );
           },
         );
@@ -697,6 +806,297 @@ class OwnerInstructorsScreen extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _InstructorCard extends StatelessWidget {
+  const _InstructorCard({
+    required this.name,
+    required this.email,
+    required this.studentCount,
+    required this.feeAmount,
+    required this.feeFrequency,
+    required this.accessStatus,
+    required this.isOwner,
+    required this.onTap,
+    this.onRequestAccess,
+    this.onEditFee,
+  });
+
+  final String name;
+  final String email;
+  final int studentCount;
+  final double feeAmount;
+  final String feeFrequency;
+  final String accessStatus;
+  final bool isOwner;
+  final VoidCallback onTap;
+  final VoidCallback? onRequestAccess;
+  final VoidCallback? onEditFee;
+
+  Color _accessColor() {
+    switch (accessStatus) {
+      case 'approved':
+        return AppTheme.success;
+      case 'pending':
+        return AppTheme.warning;
+      default:
+        return AppTheme.neutral500;
+    }
+  }
+
+  Color _accessBgColor() {
+    switch (accessStatus) {
+      case 'approved':
+        return AppTheme.successLight;
+      case 'pending':
+        return AppTheme.warningLight;
+      default:
+        return AppTheme.neutral200;
+    }
+  }
+
+  String _getInitials(String n) {
+    final parts = n.trim().split(' ');
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return '${parts[0][0]}${parts.last[0]}'.toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final freqLabel = feeFrequency == 'week' ? 'week' : 'month';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Avatar
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        gradient: isOwner
+                            ? context.primaryGradient
+                            : LinearGradient(
+                                colors: [
+                                  AppTheme.primary.withOpacity(0.8),
+                                  AppTheme.primaryLight.withOpacity(0.8),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Center(
+                        child: Text(
+                          _getInitials(name),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  name,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
+                              if (isOwner) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primary.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'You',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.primary,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (email.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.email_outlined,
+                                  size: 14,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    email,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 6,
+                            children: [
+                              _InfoChip(
+                                icon: Icons.people_outline_rounded,
+                                label: '$studentCount students',
+                              ),
+                              _InfoChip(
+                                icon: Icons.payments_outlined,
+                                label: '£${feeAmount.toStringAsFixed(2)}/$freqLabel',
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _accessBgColor(),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _accessColor().withOpacity(0.4),
+                                  ),
+                                ),
+                                child: Text(
+                                  'Access: ${accessStatus == 'not requested' ? 'Not requested' : accessStatus}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: _accessColor(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (onRequestAccess != null || onEditFee != null)
+                      PopupMenuButton<String>(
+                        icon: Icon(
+                          Icons.more_vert_rounded,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        position: PopupMenuPosition.under,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        onSelected: (value) {
+                          if (value == 'request_access' && onRequestAccess != null) {
+                            onRequestAccess!();
+                          } else if (value == 'edit_fee' && onEditFee != null) {
+                            onEditFee!();
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          if (onRequestAccess != null)
+                            const PopupMenuItem(
+                              value: 'request_access',
+                              child: Text('Request access'),
+                            ),
+                          if (onEditFee != null)
+                            const PopupMenuItem(
+                              value: 'edit_fee',
+                              child: Text('Edit fee'),
+                            ),
+                        ],
+                      )
+                    else
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: colorScheme.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            color: colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -56,8 +56,6 @@ class StudentProfileScreen extends StatelessWidget {
                   children: [
                     _buildCompactProfileHeader(context, student),
                     const SizedBox(height: 16),
-                    _buildBalanceCard(context, student),
-                    const SizedBox(height: 16),
                     _buildHoursAndPayments(context, studentId, student),
                   ],
                 );
@@ -72,7 +70,7 @@ class StudentProfileScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        gradient: AppTheme.primaryGradient,
+        gradient: context.primaryGradient,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -236,16 +234,16 @@ class StudentProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildBalanceCard(BuildContext context, Student student) {
+  Widget _buildBalanceCard(BuildContext context, double availableCredit) {
     final colorScheme = Theme.of(context).colorScheme;
-    final balanceColor = student.balanceHours < 0
+    final balanceColor = availableCredit < 0
         ? AppTheme.error
-        : student.balanceHours > 0
+        : availableCredit > 0
             ? AppTheme.success
             : colorScheme.onSurfaceVariant;
-    final balanceBgColor = student.balanceHours < 0
+    final balanceBgColor = availableCredit < 0
         ? AppTheme.errorLight
-        : student.balanceHours > 0
+        : availableCredit > 0
             ? AppTheme.successLight
             : colorScheme.surfaceContainerHighest;
 
@@ -275,7 +273,7 @@ class StudentProfileScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      student.balanceHours.toStringAsFixed(1),
+                      availableCredit.toStringAsFixed(1),
                       style: TextStyle(
                         fontSize: 36,
                         fontWeight: FontWeight.w700,
@@ -308,7 +306,7 @@ class StudentProfileScreen extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
             ),
             child: Icon(
-              student.balanceHours < 0
+              availableCredit < 0
                   ? Icons.warning_amber_rounded
                   : Icons.schedule_rounded,
               color: balanceColor,
@@ -350,10 +348,14 @@ class StudentProfileScreen extends StatelessWidget {
             final bookedHours = lessons
                 .where((lesson) => lesson.startAt.isAfter(now))
                 .fold<double>(0, (total, lesson) => total + lesson.durationHours);
-            final remainingHours = totalPaidHours - completedHours - bookedHours;
+            // Available credit = paid - completed only (upcoming lessons don't count until they happen)
+            final availableCredit = totalPaidHours - completedHours;
+            final creditAfterUpcoming = availableCredit - bookedHours;
 
             return Column(
               children: [
+                _buildBalanceCard(context, availableCredit),
+                const SizedBox(height: 16),
                 _buildStatisticsCard(
                   context,
                   totalLessons: lessons.length,
@@ -367,7 +369,8 @@ class StudentProfileScreen extends StatelessWidget {
                   totalPaidHours: totalPaidHours,
                   completedHours: completedHours,
                   bookedHours: bookedHours,
-                  remainingHours: remainingHours,
+                  availableCredit: availableCredit,
+                  creditAfterUpcoming: creditAfterUpcoming,
                 ),
                 const SizedBox(height: 16),
                 _buildPaymentsHistory(context, payments),
@@ -522,7 +525,8 @@ class StudentProfileScreen extends StatelessWidget {
     required double totalPaidHours,
     required double completedHours,
     required double bookedHours,
-    required double remainingHours,
+    required double availableCredit,
+    required double creditAfterUpcoming,
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
@@ -591,10 +595,19 @@ class StudentProfileScreen extends StatelessWidget {
           _buildHoursRow(
             context,
             'Available credit',
-            remainingHours,
-            remainingHours < 0 ? AppTheme.error : AppTheme.primary,
+            availableCredit,
+            availableCredit < 0 ? AppTheme.error : AppTheme.primary,
             isBold: true,
           ),
+          if (bookedHours > 0) ...[
+            const SizedBox(height: 12),
+            _buildHoursRow(
+              context,
+              'Credit after upcoming',
+              creditAfterUpcoming,
+              creditAfterUpcoming < 0 ? AppTheme.error : colorScheme.onSurfaceVariant,
+            ),
+          ],
         ],
       ),
     );

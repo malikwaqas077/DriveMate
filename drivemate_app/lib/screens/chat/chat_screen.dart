@@ -114,7 +114,7 @@ class _ChatScreenState extends State<ChatScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                gradient: AppTheme.primaryGradient,
+                gradient: context.primaryGradient,
                 shape: BoxShape.circle,
               ),
               child: Center(
@@ -314,7 +314,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     const SizedBox(width: 12),
                     Container(
                       decoration: BoxDecoration(
-                        gradient: AppTheme.primaryGradient,
+                        gradient: context.primaryGradient,
                         shape: BoxShape.circle,
                       ),
                       child: IconButton(

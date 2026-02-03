@@ -3,14 +3,54 @@ import 'package:flutter/material.dart';
 /// DriveMate App Theme
 /// Modern Material 3 design with custom color palette, typography, and component themes
 
+/// Theme extension for custom gradients derived from the current theme color
+class DriveMateThemeExtension extends ThemeExtension<DriveMateThemeExtension> {
+  const DriveMateThemeExtension({
+    required this.primaryGradient,
+    required this.heroGradient,
+  });
+
+  final LinearGradient primaryGradient;
+  final LinearGradient heroGradient;
+
+  @override
+  DriveMateThemeExtension copyWith({
+    LinearGradient? primaryGradient,
+    LinearGradient? heroGradient,
+  }) =>
+      DriveMateThemeExtension(
+        primaryGradient: primaryGradient ?? this.primaryGradient,
+        heroGradient: heroGradient ?? this.heroGradient,
+      );
+
+  @override
+  DriveMateThemeExtension lerp(
+    covariant ThemeExtension<DriveMateThemeExtension>? other,
+    double t,
+  ) =>
+      this;
+}
+
+/// Creates a gradient from a base color (darker -> base -> lighter)
+LinearGradient _gradientFromColor(Color base, {bool isDark = false}) {
+  final darker = Color.lerp(base, Colors.black, 0.25) ?? base;
+  final lighter = Color.lerp(base, Colors.white, isDark ? 0.1 : 0.2) ?? base;
+  return LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [darker, base, lighter],
+    stops: const [0.0, 0.5, 1.0],
+  );
+}
+
 class AppTheme {
   AppTheme._();
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // BRAND COLORS
+  // BRAND COLORS (semantic - do not change with theme color)
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Primary palette - Deep teal to turquoise gradient feel
+  // Primary palette - fallback when no context (e.g. default seed = teal)
   static const Color primaryDark = Color(0xFF0D7377);
   static const Color primary = Color(0xFF14919B);
   static const Color primaryLight = Color(0xFF32E0C4);
@@ -42,7 +82,7 @@ class AppTheme {
   static const Color neutral800 = Color(0xFF27272A);
   static const Color neutral900 = Color(0xFF18181B);
 
-  // Gradient definitions
+  // Default gradient (used when no BuildContext available)
   static const LinearGradient primaryGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
@@ -68,24 +108,14 @@ class AppTheme {
     colors: [Color(0xFFFFFFFF), Color(0xFFF8FAFC)],
   );
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // LIGHT THEME
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  static ThemeData get lightTheme {
+  /// Build light theme with the given seed color
+  static ThemeData lightTheme(int seedColorValue) {
+    final seedColor = Color(seedColorValue);
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: primary,
+      seedColor: seedColor,
       brightness: Brightness.light,
-      primary: primary,
+      primary: seedColor,
       onPrimary: Colors.white,
-      primaryContainer: const Color(0xFFB2F5EA),
-      onPrimaryContainer: primaryDark,
-      secondary: secondary,
-      onSecondary: Colors.white,
-      secondaryContainer: secondaryLight,
-      onSecondaryContainer: secondaryDark,
-      tertiary: info,
-      onTertiary: Colors.white,
       error: error,
       onError: Colors.white,
       errorContainer: errorLight,
@@ -99,9 +129,24 @@ class AppTheme {
       shadow: Colors.black.withOpacity(0.05),
     );
 
+    final primaryColor = colorScheme.primary;
+    final extensions = DriveMateThemeExtension(
+      primaryGradient: _gradientFromColor(primaryColor, isDark: false),
+      heroGradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color.lerp(primaryColor, Colors.black, 0.3) ?? primaryColor,
+          primaryColor,
+          const Color(0xFF212F45),
+        ],
+      ),
+    );
+
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
+      extensions: [extensions],
       brightness: Brightness.light,
       scaffoldBackgroundColor: neutral50,
       fontFamily: 'Inter',
@@ -127,7 +172,7 @@ class AppTheme {
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         elevation: 0,
         backgroundColor: Colors.white,
-        selectedItemColor: primary,
+        selectedItemColor: primaryColor,
         unselectedItemColor: neutral400,
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle: const TextStyle(
@@ -145,10 +190,10 @@ class AppTheme {
         elevation: 0,
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: primary.withOpacity(0.15),
+        indicatorColor: primaryColor.withOpacity(0.15),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return IconThemeData(color: primary, size: 24);
+            return IconThemeData(color: primaryColor, size: 24);
           }
           return IconThemeData(color: neutral500, size: 24);
         }),
@@ -157,7 +202,7 @@ class AppTheme {
             return TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: primary,
+              color: primaryColor,
             );
           }
           return TextStyle(
@@ -170,7 +215,7 @@ class AppTheme {
 
       // Tab Bar Theme
       tabBarTheme: TabBarThemeData(
-        labelColor: primary,
+        labelColor: primaryColor,
         unselectedLabelColor: neutral500,
         labelStyle: const TextStyle(
           fontSize: 14,
@@ -181,7 +226,7 @@ class AppTheme {
           fontWeight: FontWeight.w500,
         ),
         indicator: UnderlineTabIndicator(
-          borderSide: BorderSide(width: 3, color: primary),
+          borderSide: BorderSide(width: 3, color: primaryColor),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
         ),
         indicatorSize: TabBarIndicatorSize.label,
@@ -216,7 +261,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: primary, width: 2),
+          borderSide: BorderSide(color: primaryColor, width: 2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -240,7 +285,7 @@ class AppTheme {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          backgroundColor: primary,
+          backgroundColor: primaryColor,
           foregroundColor: Colors.white,
           shadowColor: Colors.transparent,
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
@@ -274,7 +319,7 @@ class AppTheme {
       // Text Button Theme
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: primary,
+          foregroundColor: primaryColor,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -289,8 +334,8 @@ class AppTheme {
       // Outlined Button Theme
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: primary,
-          side: BorderSide(color: primary, width: 1.5),
+          foregroundColor: primaryColor,
+          side: BorderSide(color: primaryColor, width: 1.5),
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -306,7 +351,7 @@ class AppTheme {
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         elevation: 4,
         highlightElevation: 8,
-        backgroundColor: primary,
+        backgroundColor: primaryColor,
         foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -327,7 +372,7 @@ class AppTheme {
         secondaryLabelStyle: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w600,
-          color: primary,
+          color: primaryColor,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         shape: RoundedRectangleBorder(
@@ -429,7 +474,7 @@ class AppTheme {
 
       // Progress Indicator Theme
       progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: primary,
+        color: primaryColor,
         linearTrackColor: neutral200,
         circularTrackColor: neutral200,
       ),
@@ -534,24 +579,14 @@ class AppTheme {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // DARK THEME
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  static ThemeData get darkTheme {
+  /// Build dark theme with the given seed color
+  static ThemeData darkTheme(int seedColorValue) {
+    final seedColor = Color(seedColorValue);
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: primary,
+      seedColor: seedColor,
       brightness: Brightness.dark,
-      primary: primaryLight,
+      primary: Color.lerp(seedColor, Colors.white, 0.2) ?? seedColor,
       onPrimary: neutral900,
-      primaryContainer: primaryDark,
-      onPrimaryContainer: primaryLight,
-      secondary: secondaryLight,
-      onSecondary: neutral900,
-      secondaryContainer: secondaryDark,
-      onSecondaryContainer: secondaryLight,
-      tertiary: const Color(0xFF93C5FD),
-      onTertiary: neutral900,
       error: const Color(0xFFFCA5A5),
       onError: neutral900,
       errorContainer: const Color(0xFF7F1D1D),
@@ -565,9 +600,24 @@ class AppTheme {
       shadow: Colors.black.withOpacity(0.3),
     );
 
+    final primaryColor = colorScheme.primary;
+    final extensions = DriveMateThemeExtension(
+      primaryGradient: _gradientFromColor(primaryColor, isDark: true),
+      heroGradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color.lerp(primaryColor, Colors.black, 0.3) ?? primaryColor,
+          primaryColor,
+          const Color(0xFF212F45),
+        ],
+      ),
+    );
+
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
+      extensions: [extensions],
       brightness: Brightness.dark,
       scaffoldBackgroundColor: const Color(0xFF0F0F1A),
       fontFamily: 'Inter',
@@ -593,7 +643,7 @@ class AppTheme {
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         elevation: 0,
         backgroundColor: const Color(0xFF1A1A2E),
-        selectedItemColor: primaryLight,
+        selectedItemColor: primaryColor,
         unselectedItemColor: neutral500,
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle: const TextStyle(
@@ -611,10 +661,10 @@ class AppTheme {
         elevation: 0,
         backgroundColor: const Color(0xFF1A1A2E),
         surfaceTintColor: Colors.transparent,
-        indicatorColor: primaryLight.withOpacity(0.15),
+        indicatorColor: primaryColor.withOpacity(0.15),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return IconThemeData(color: primaryLight, size: 24);
+            return IconThemeData(color: primaryColor, size: 24);
           }
           return IconThemeData(color: neutral500, size: 24);
         }),
@@ -623,7 +673,7 @@ class AppTheme {
             return TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: primaryLight,
+              color: primaryColor,
             );
           }
           return TextStyle(
@@ -636,7 +686,7 @@ class AppTheme {
 
       // Tab Bar Theme
       tabBarTheme: TabBarThemeData(
-        labelColor: primaryLight,
+        labelColor: primaryColor,
         unselectedLabelColor: neutral400,
         labelStyle: const TextStyle(
           fontSize: 14,
@@ -647,7 +697,7 @@ class AppTheme {
           fontWeight: FontWeight.w500,
         ),
         indicator: UnderlineTabIndicator(
-          borderSide: BorderSide(width: 3, color: primaryLight),
+          borderSide: BorderSide(width: 3, color: primaryColor),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
         ),
         indicatorSize: TabBarIndicatorSize.label,
@@ -682,7 +732,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: primaryLight, width: 2),
+          borderSide: BorderSide(color: primaryColor, width: 2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -706,7 +756,7 @@ class AppTheme {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          backgroundColor: primaryLight,
+          backgroundColor: primaryColor,
           foregroundColor: neutral900,
           shadowColor: Colors.transparent,
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
@@ -742,7 +792,7 @@ class AppTheme {
       // Text Button Theme
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: primaryLight,
+          foregroundColor: primaryColor,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -757,8 +807,8 @@ class AppTheme {
       // Outlined Button Theme
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: primaryLight,
-          side: BorderSide(color: primaryLight, width: 1.5),
+          foregroundColor: primaryColor,
+          side: BorderSide(color: primaryColor, width: 1.5),
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -786,7 +836,7 @@ class AppTheme {
       chipTheme: ChipThemeData(
         elevation: 0,
         backgroundColor: const Color(0xFF2D2D44),
-        selectedColor: primaryLight.withOpacity(0.2),
+        selectedColor: primaryColor.withOpacity(0.2),
         labelStyle: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w500,
@@ -888,7 +938,7 @@ class AppTheme {
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return primaryLight;
+            return primaryColor;
           }
           return neutral700;
         }),
@@ -897,7 +947,7 @@ class AppTheme {
 
       // Progress Indicator Theme
       progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: primaryLight,
+        color: primaryColor,
         linearTrackColor: neutral700,
         circularTrackColor: neutral700,
       ),
@@ -1012,4 +1062,9 @@ extension ThemeExtensions on BuildContext {
   ColorScheme get colorScheme => theme.colorScheme;
   TextTheme get textTheme => theme.textTheme;
   bool get isDark => theme.brightness == Brightness.dark;
+
+  /// Primary gradient derived from the current theme color
+  LinearGradient get primaryGradient =>
+      theme.extension<DriveMateThemeExtension>()?.primaryGradient ??
+      AppTheme.primaryGradient;
 }

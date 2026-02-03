@@ -109,7 +109,7 @@ class _LoadingViewState extends State<LoadingView>
       width: 100,
       height: 100,
       decoration: BoxDecoration(
-        gradient: AppTheme.primaryGradient,
+        gradient: context.primaryGradient,
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(

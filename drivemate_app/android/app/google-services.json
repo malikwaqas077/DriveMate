@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "98973897901-987pm3qn71qf60qu4to3ppm4oee2pllh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "app.techsol.drivemate",
+            "certificate_hash": "e5ccbf3c41485da9b513b7692a8beb2b9d33d116"
+          }
+        },
+        {
           "client_id": "98973897901-poqc7mksroa76n5e96ol4cvkq9rljhdb.apps.googleusercontent.com",
           "client_type": 3
         }

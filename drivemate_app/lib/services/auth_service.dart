@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 
 import '../firebase_options.dart';
 import 'fcm_service.dart';
+import 'role_preference_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -183,6 +184,7 @@ class AuthService {
     final userId = _auth.currentUser?.uid;
     if (userId != null) {
       await FCMService.instance.clearToken(userId);
+      await RolePreferenceService.instance.clearPreferredRole(userId);
     }
     await _auth.signOut();
   }

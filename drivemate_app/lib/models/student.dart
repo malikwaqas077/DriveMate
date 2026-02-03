@@ -13,6 +13,7 @@ class Student {
     this.phone,
     this.licenseNumber,
     this.address,
+    this.createdAt,
   });
 
   final String id;
@@ -26,6 +27,7 @@ class Student {
   final double? hourlyRate;
   final double balanceHours;
   final String status;
+  final DateTime? createdAt;
 
   Map<String, dynamic> toMap() {
     return {
@@ -57,6 +59,7 @@ class Student {
       hourlyRate: _toNullableDouble(data['hourlyRate']),
       balanceHours: _toDouble(data['balanceHours']),
       status: (data['status'] ?? 'active') as String,
+      createdAt: _toDateTime(data['createdAt']),
     );
   }
 
@@ -71,5 +74,12 @@ class Student {
     if (value is int) return value.toDouble();
     if (value is double) return value;
     return 0;
+  }
+
+  static DateTime? _toDateTime(Object? value) {
+    if (value is Timestamp) return value.toDate().toLocal();
+    if (value is DateTime) return value.toLocal();
+    if (value is String) return DateTime.tryParse(value)?.toLocal();
+    return null;
   }
 }

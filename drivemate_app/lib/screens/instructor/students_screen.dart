@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../models/lesson.dart';
 import '../../models/payment.dart';
 import '../../models/student.dart';
 import '../../models/user_profile.dart';
@@ -85,43 +86,69 @@ class _StudentsScreenState extends State<StudentsScreen> {
             widget.instructor.id,
             status: _statusFilter,
           ),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+          builder: (context, studentsSnapshot) {
+            if (studentsSnapshot.connectionState == ConnectionState.waiting) {
               return const LoadingView(message: 'Loading students...');
             }
-            final students = snapshot.data ?? [];
+            final students = studentsSnapshot.data ?? [];
             final allStudents = allStudentsSnapshot.data ?? [];
-            
-            // Calculate counts for each status
-            final statusCounts = <String, int>{
-              'all': allStudents.length,
-              'active': allStudents.where((s) => s.status == 'active').length,
-              'inactive': allStudents.where((s) => s.status == 'inactive').length,
-              'passed': allStudents.where((s) => s.status == 'passed').length,
-            };
-            
-            return Scaffold(
-              body: Column(
-                children: [
-                  _buildStatusFilters(statusCounts),
-                  Expanded(
-                    child: students.isEmpty
-                        ? EmptyView(
-                            message: 'No students yet',
-                            subtitle: 'Add your first student to get started',
-                            type: EmptyViewType.students,
-                            actionLabel: 'Add Student',
-                            onAction: () => _showAddStudent(context),
-                          )
-                        : _buildStudentsList(students),
-                  ),
-                ],
-              ),
-              floatingActionButton: FloatingActionButton.extended(
-                onPressed: () => _showAddStudent(context),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Add Student'),
-              ),
+
+            // Get payments and lessons to compute credit per student
+            return StreamBuilder<List<Payment>>(
+              stream: _firestoreService.streamPaymentsForInstructor(widget.instructor.id),
+              builder: (context, paymentsSnapshot) {
+                return StreamBuilder<List<Lesson>>(
+                  stream: _firestoreService.streamLessonsForInstructor(widget.instructor.id),
+                  builder: (context, lessonsSnapshot) {
+                    final payments = paymentsSnapshot.data ?? [];
+                    final lessons = lessonsSnapshot.data ?? [];
+                    final now = DateTime.now();
+
+                    // Compute available credit per student (paid - completed only, not upcoming)
+                    final creditMap = <String, double>{};
+                    for (final s in students) {
+                      final totalPaid = payments
+                          .where((p) => p.studentId == s.id)
+                          .fold<double>(0, (t, p) => t + p.hoursPurchased);
+                      final completedHours = lessons
+                          .where((l) => l.studentId == s.id && !l.startAt.isAfter(now))
+                          .fold<double>(0, (t, l) => t + l.durationHours);
+                      creditMap[s.id] = totalPaid - completedHours;
+                    }
+
+                    final statusCounts = <String, int>{
+                      'all': allStudents.length,
+                      'active': allStudents.where((s) => s.status == 'active').length,
+                      'inactive': allStudents.where((s) => s.status == 'inactive').length,
+                      'passed': allStudents.where((s) => s.status == 'passed').length,
+                    };
+
+                    return Scaffold(
+                      body: Column(
+                        children: [
+                          _buildStatusFilters(statusCounts),
+                          Expanded(
+                            child: students.isEmpty
+                                ? EmptyView(
+                                    message: 'No students yet',
+                                    subtitle: 'Add your first student to get started',
+                                    type: EmptyViewType.students,
+                                    actionLabel: 'Add Student',
+                                    onAction: () => _showAddStudent(context),
+                                  )
+                                : _buildStudentsList(students, creditMap),
+                          ),
+                        ],
+                      ),
+                      floatingActionButton: FloatingActionButton.extended(
+                        onPressed: () => _showAddStudent(context),
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('Add Student'),
+                      ),
+                    );
+                  },
+                );
+              },
             );
           },
         );
@@ -177,22 +204,26 @@ class _StudentsScreenState extends State<StudentsScreen> {
     );
   }
 
-  Widget _buildStudentsList(List<Student> students) {
+  Widget _buildStudentsList(
+    List<Student> students,
+    Map<String, double> creditMap,
+  ) {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       itemCount: students.length,
       itemBuilder: (context, index) {
         final student = students[index];
-        return _buildStudentCard(student);
+        final availableCredit = creditMap[student.id] ?? 0.0;
+        return _buildStudentCard(student, availableCredit);
       },
     );
   }
 
-  Widget _buildStudentCard(Student student) {
+  Widget _buildStudentCard(Student student, double availableCredit) {
     final colorScheme = Theme.of(context).colorScheme;
-    final balanceColor = student.balanceHours < 0
+    final balanceColor = availableCredit < 0
         ? AppTheme.error
-        : student.balanceHours > 0
+        : availableCredit > 0
             ? AppTheme.success
             : colorScheme.onSurfaceVariant;
 
@@ -233,7 +264,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
-                    gradient: AppTheme.primaryGradient,
+                    gradient: context.primaryGradient,
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Center(
@@ -253,21 +284,20 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(
+                        student.name,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.onSurface,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                      const SizedBox(height: 8),
                       Row(
                         children: [
-                          Flexible(
-                            child: Text(
-                              student.name,
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: colorScheme.onSurface,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
+                          // Status badge - always on the left
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -287,11 +317,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                               ),
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
+                          const SizedBox(width: 12),
                           // Balance
                           Icon(
                             Icons.schedule_outlined,
@@ -300,7 +326,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            '${student.balanceHours.toStringAsFixed(1)}h',
+                            '${availableCredit.toStringAsFixed(1)}h',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -398,11 +424,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
     final rateController = TextEditingController();
     final phoneController = TextEditingController();
     final licenceController = TextEditingController();
+    final addressController = TextEditingController();
     final amountPaidController = TextEditingController();
     final hoursPaidController = TextEditingController();
     String status = 'active';
+    String paymentMethod = 'cash';
+    String paidTo = 'instructor';
     bool createLogin = true;
     bool saving = false;
+    bool optionalExpanded = false;
+    bool initialPaymentExpanded = false;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -524,92 +555,181 @@ class _StudentsScreenState extends State<StudentsScreen> {
                             keyboardType: TextInputType.phone,
                           ),
                           const SizedBox(height: 24),
-                          _buildFormLabel('Optional Information (can be added later)'),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: emailController,
-                            decoration: const InputDecoration(
-                              labelText: 'Email (optional)',
-                              prefixIcon: Icon(Icons.email_outlined),
-                              helperText: 'Student can add email later',
-                            ),
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: licenceController,
-                            decoration: const InputDecoration(
-                              labelText: 'Licence Number (optional)',
-                              prefixIcon: Icon(Icons.badge_outlined),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: rateController,
-                            decoration: const InputDecoration(
-                              labelText: 'Hourly Rate (£) (optional)',
-                              prefixIcon: Icon(Icons.payments_outlined),
-                            ),
-                            keyboardType: TextInputType.number,
-                          ),
-                          const SizedBox(height: 16),
-                          DropdownButtonFormField<String>(
-                            value: status,
-                            decoration: const InputDecoration(
-                              labelText: 'Status',
-                              prefixIcon: Icon(Icons.flag_outlined),
-                            ),
-                            items: _statusOptions
-                                .map(
-                                  (value) => DropdownMenuItem(
-                                    value: value,
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          _getStatusIcon(value),
-                                          size: 18,
-                                          color: _getStatusColor(value),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(value[0].toUpperCase() + value.substring(1)),
-                                      ],
-                                    ),
+                          _buildExpandableSection(
+                            context,
+                            title: 'Optional Information',
+                            subtitle: 'Email, address, licence, rate, status',
+                            expanded: optionalExpanded,
+                            onExpandedChanged: (v) => setDialogState(() => optionalExpanded = v),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                TextField(
+                                  controller: emailController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Email (optional)',
+                                    prefixIcon: Icon(Icons.email_outlined),
+                                    helperText: 'Student can add email later',
                                   ),
-                                )
-                                .toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                setDialogState(() => status = value);
-                              }
-                            },
+                                  keyboardType: TextInputType.emailAddress,
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: addressController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Address (optional)',
+                                    prefixIcon: Icon(Icons.location_on_outlined),
+                                    helperText: 'For navigation to pickup',
+                                  ),
+                                  maxLines: 2,
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: licenceController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Licence Number (optional)',
+                                    prefixIcon: Icon(Icons.badge_outlined),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: rateController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Hourly Rate (£) (optional)',
+                                    prefixIcon: Icon(Icons.payments_outlined),
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                ),
+                                const SizedBox(height: 16),
+                                DropdownButtonFormField<String>(
+                                  value: status,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Status',
+                                    prefixIcon: Icon(Icons.flag_outlined),
+                                  ),
+                                  items: _statusOptions
+                                      .map(
+                                        (value) => DropdownMenuItem(
+                                          value: value,
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                _getStatusIcon(value),
+                                                size: 18,
+                                                color: _getStatusColor(value),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(value[0].toUpperCase() + value.substring(1)),
+                                            ],
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      setDialogState(() => status = value);
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 24),
-                          _buildFormLabel('Initial Payment (optional)'),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: amountPaidController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Amount (£)',
-                                    prefixIcon: Icon(Icons.currency_pound),
-                                  ),
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          _buildExpandableSection(
+                            context,
+                            title: 'Initial Payment (optional)',
+                            subtitle: 'Record payment when adding student',
+                            expanded: initialPaymentExpanded,
+                            onExpandedChanged: (v) => setDialogState(() => initialPaymentExpanded = v),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: amountPaidController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Amount (£)',
+                                          prefixIcon: Icon(Icons.currency_pound),
+                                        ),
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: hoursPaidController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Hours',
+                                          prefixIcon: Icon(Icons.schedule_outlined),
+                                        ),
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: TextField(
-                                  controller: hoursPaidController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Hours',
-                                    prefixIcon: Icon(Icons.schedule_outlined),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Payment Method',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    _buildPaymentMethodChip('cash', 'Cash', Icons.payments_outlined, paymentMethod,
+                                        (v) => setDialogState(() => paymentMethod = v)),
+                                    _buildPaymentMethodChip('bank_transfer', 'Bank', Icons.account_balance_outlined, paymentMethod,
+                                        (v) => setDialogState(() => paymentMethod = v)),
+                                    _buildPaymentMethodChip('card', 'Card', Icons.credit_card_outlined, paymentMethod,
+                                        (v) => setDialogState(() => paymentMethod = v)),
+                                    _buildPaymentMethodChip('other', 'Other', Icons.receipt_outlined, paymentMethod,
+                                        (v) => setDialogState(() => paymentMethod = v)),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Paid To',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildPaidToChip(
+                                        context,
+                                        'instructor',
+                                        'Instructor',
+                                        Icons.person_outline,
+                                        paidTo,
+                                        (v) => setDialogState(() => paidTo = v),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _buildPaidToChip(
+                                        context,
+                                        'school',
+                                        'School',
+                                        Icons.business_outlined,
+                                        paidTo,
+                                        (v) => setDialogState(() => paidTo = v),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 24),
                           _buildFormLabel('Student Login'),
@@ -697,9 +817,12 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                       rateController: rateController,
                                       phoneController: phoneController,
                                       licenceController: licenceController,
+                                      addressController: addressController,
                                       amountPaidController: amountPaidController,
                                       hoursPaidController: hoursPaidController,
                                       status: status,
+                                      paymentMethod: paymentMethod,
+                                      paidTo: paidTo,
                                       createLogin: createLogin,
                                       saving: saving,
                                       setSaving: (val) => setDialogState(() => saving = val),
@@ -732,6 +855,138 @@ class _StudentsScreenState extends State<StudentsScreen> {
     );
   }
 
+  Widget _buildExpandableSection(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required bool expanded,
+    required ValueChanged<bool> onExpandedChanged,
+    required Widget child,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: expanded,
+          onExpansionChanged: onExpandedChanged,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Row(
+            children: [
+              Icon(Icons.expand_more, color: colorScheme.onSurfaceVariant, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              subtitle,
+              style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+            ),
+          ),
+          children: [child],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentMethodChip(
+    String value,
+    String label,
+    IconData icon,
+    String current,
+    ValueChanged<String> onSelect,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isSelected = current == value;
+    return GestureDetector(
+      onTap: () => onSelect(value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primary.withOpacity(0.15) : colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? AppTheme.primary : colorScheme.outlineVariant,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: isSelected ? AppTheme.primary : colorScheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: isSelected ? AppTheme.primary : colorScheme.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaidToChip(
+    BuildContext context,
+    String value,
+    String label,
+    IconData icon,
+    String current,
+    ValueChanged<String> onSelect,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isSelected = current == value;
+    return GestureDetector(
+      onTap: () => onSelect(value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primary.withOpacity(0.15) : colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? AppTheme.primary : colorScheme.outlineVariant,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 20, color: isSelected ? AppTheme.primary : colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: isSelected ? AppTheme.primary : colorScheme.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _saveStudent(
     BuildContext context,
     StateSetter setDialogState, {
@@ -741,9 +996,12 @@ class _StudentsScreenState extends State<StudentsScreen> {
     required TextEditingController rateController,
     required TextEditingController phoneController,
     required TextEditingController licenceController,
+    required TextEditingController addressController,
     required TextEditingController amountPaidController,
     required TextEditingController hoursPaidController,
     required String status,
+    required String paymentMethod,
+    required String paidTo,
     required bool createLogin,
     required bool saving,
     required Function(bool) setSaving,
@@ -798,6 +1056,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       email: email.isEmpty ? null : email,
       phone: phoneController.text.trim().isEmpty ? null : phoneController.text.trim(),
       licenseNumber: licenceController.text.trim().isEmpty ? null : licenceController.text.trim(),
+      address: addressController.text.trim().isEmpty ? null : addressController.text.trim(),
       hourlyRate: rate,
       balanceHours: 0,
       status: status,
@@ -819,8 +1078,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
           schoolId: widget.instructor.schoolId,
           amount: amountPaid,
           currency: 'GBP',
-          method: 'cash',
-          paidTo: 'instructor',
+          method: paymentMethod,
+          paidTo: paidTo,
           hoursPurchased: hoursPaid,
           createdAt: DateTime.now(),
         );
@@ -874,8 +1133,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
     final rateController = TextEditingController(text: student.hourlyRate?.toStringAsFixed(2) ?? '');
     final phoneController = TextEditingController(text: student.phone ?? '');
     final licenceController = TextEditingController(text: student.licenseNumber ?? '');
+    final addressController = TextEditingController(text: student.address ?? '');
     String status = student.status;
     bool saving = false;
+    bool optionalExpanded = false;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -905,7 +1166,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            gradient: AppTheme.primaryGradient,
+                            gradient: context.primaryGradient,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Center(
@@ -969,61 +1230,83 @@ class _StudentsScreenState extends State<StudentsScreen> {
                             ),
                             keyboardType: TextInputType.phone,
                           ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: licenceController,
-                            decoration: const InputDecoration(
-                              labelText: 'Licence Number',
-                              prefixIcon: Icon(Icons.badge_outlined),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: emailController,
-                            decoration: const InputDecoration(
-                              labelText: 'Email',
-                              prefixIcon: Icon(Icons.email_outlined),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: rateController,
-                            decoration: const InputDecoration(
-                              labelText: 'Hourly Rate (£)',
-                              prefixIcon: Icon(Icons.payments_outlined),
-                            ),
-                            keyboardType: TextInputType.number,
-                          ),
-                          const SizedBox(height: 16),
-                          DropdownButtonFormField<String>(
-                            value: status,
-                            decoration: const InputDecoration(
-                              labelText: 'Status',
-                              prefixIcon: Icon(Icons.flag_outlined),
-                            ),
-                            items: _statusOptions
-                                .map(
-                                  (value) => DropdownMenuItem(
-                                    value: value,
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          _getStatusIcon(value),
-                                          size: 18,
-                                          color: _getStatusColor(value),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(value[0].toUpperCase() + value.substring(1)),
-                                      ],
-                                    ),
+                          const SizedBox(height: 24),
+                          _buildExpandableSection(
+                            context,
+                            title: 'Optional Information',
+                            subtitle: 'Email, address, licence, rate, status',
+                            expanded: optionalExpanded,
+                            onExpandedChanged: (v) => setDialogState(() => optionalExpanded = v),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                TextField(
+                                  controller: emailController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Email',
+                                    prefixIcon: Icon(Icons.email_outlined),
                                   ),
-                                )
-                                .toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                setDialogState(() => status = value);
-                              }
-                            },
+                                  keyboardType: TextInputType.emailAddress,
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: addressController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Address (optional)',
+                                    prefixIcon: Icon(Icons.location_on_outlined),
+                                  ),
+                                  maxLines: 2,
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: licenceController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Licence Number',
+                                    prefixIcon: Icon(Icons.badge_outlined),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: rateController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Hourly Rate (£)',
+                                    prefixIcon: Icon(Icons.payments_outlined),
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                ),
+                                const SizedBox(height: 16),
+                                DropdownButtonFormField<String>(
+                                  value: status,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Status',
+                                    prefixIcon: Icon(Icons.flag_outlined),
+                                  ),
+                                  items: _statusOptions
+                                      .map(
+                                        (value) => DropdownMenuItem(
+                                          value: value,
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                _getStatusIcon(value),
+                                                size: 18,
+                                                color: _getStatusColor(value),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(value[0].toUpperCase() + value.substring(1)),
+                                            ],
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      setDialogState(() => status = value);
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -1070,6 +1353,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                         'phone': phoneController.text.trim().isEmpty ? null : phoneController.text.trim(),
                                         'licenseNumber': licenceController.text.trim().isEmpty ? null : licenceController.text.trim(),
                                         'email': emailController.text.trim().isEmpty ? null : emailController.text.trim(),
+                                        'address': addressController.text.trim().isEmpty ? null : addressController.text.trim(),
                                         'hourlyRate': parsedRate,
                                         'status': status,
                                       });

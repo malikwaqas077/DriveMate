@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../models/lesson.dart';
 import '../../models/payment.dart';
 import '../../models/student.dart';
 import '../../models/user_profile.dart';
@@ -132,38 +133,209 @@ class PaymentsScreen extends StatelessWidget {
             final totalAmount = payments.fold<double>(0, (sum, p) => sum + p.amount);
             final totalHours = payments.fold<double>(0, (sum, p) => sum + p.hoursPurchased);
 
-            return Scaffold(
-              body: Column(
-                children: [
-                  // Summary Card
-                  _buildSummaryCard(context, totalAmount, totalHours, payments.length),
-                  // Payments List
-                  Expanded(
-                    child: payments.isEmpty
-                        ? EmptyView(
-                            message: 'No payments yet',
-                            subtitle: 'Record your first payment to get started',
-                            type: EmptyViewType.payments,
-                            actionLabel: 'Add Payment',
-                            onAction: students.isEmpty
-                                ? null
-                                : () => _showAddPayment(context, students, schoolId),
-                          )
-                        : _buildPaymentsList(context, payments, studentMap, students, schoolId),
+            return StreamBuilder<List<Lesson>>(
+              stream: _firestoreService.streamLessonsForInstructor(instructor.id),
+              builder: (context, lessonsSnapshot) {
+                if (lessonsSnapshot.connectionState == ConnectionState.waiting) {
+                  return const LoadingView(message: 'Loading payments...');
+                }
+                final lessons = lessonsSnapshot.data ?? [];
+                final expectedByWeek = _computeExpectedIncomeByWeek(
+                  lessons,
+                  students,
+                  payments,
+                );
+
+                return Scaffold(
+                  body: Column(
+                    children: [
+                      // Summary Card
+                      _buildSummaryCard(context, totalAmount, totalHours, payments.length),
+                      // Expected Income by Week
+                      if (expectedByWeek.isNotEmpty)
+                        _buildExpectedIncomeSection(context, expectedByWeek),
+                      // Payments List
+                      Expanded(
+                        child: payments.isEmpty
+                            ? EmptyView(
+                                message: 'No payments yet',
+                                subtitle: 'Record your first payment to get started',
+                                type: EmptyViewType.payments,
+                                actionLabel: 'Add Payment',
+                                onAction: students.isEmpty
+                                    ? null
+                                    : () => _showAddPayment(context, students, schoolId),
+                              )
+                            : _buildPaymentsList(context, payments, studentMap, students, schoolId),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              floatingActionButton: students.isEmpty
-                  ? null
-                  : FloatingActionButton.extended(
-                      onPressed: () => _showAddPayment(context, students, schoolId),
-                      icon: const Icon(Icons.add_rounded),
-                      label: const Text('Add Payment'),
-                    ),
+                  floatingActionButton: students.isEmpty
+                      ? null
+                      : FloatingActionButton.extended(
+                          onPressed: () => _showAddPayment(context, students, schoolId),
+                          icon: const Icon(Icons.add_rounded),
+                          label: const Text('Add Payment'),
+                        ),
+                );
+              },
             );
           },
         );
       },
+    );
+  }
+
+  /// Returns start of week (Monday) for a given date.
+  DateTime _startOfWeek(DateTime date) {
+    final weekday = date.weekday;
+    final daysFromMonday = weekday == 7 ? 0 : weekday - 1;
+    return DateTime(date.year, date.month, date.day - daysFromMonday);
+  }
+
+  /// Compute expected income by week from upcoming scheduled lessons.
+  Map<DateTime, double> _computeExpectedIncomeByWeek(
+    List<Lesson> lessons,
+    List<Student> students,
+    List<Payment> payments,
+  ) {
+    final now = DateTime.now();
+    final upcoming = lessons
+        .where((l) =>
+            l.status == 'scheduled' &&
+            l.startAt.isAfter(now))
+        .toList();
+
+    final rateByStudent = <String, double>{};
+    for (final s in students) {
+      if (s.hourlyRate != null && s.hourlyRate! > 0) {
+        rateByStudent[s.id] = s.hourlyRate!;
+      } else {
+        final studentPayments = payments.where((p) => p.studentId == s.id).toList();
+        final totalAmount = studentPayments.fold<double>(0, (sum, p) => sum + p.amount);
+        final totalHours = studentPayments.fold<double>(0, (sum, p) => sum + p.hoursPurchased);
+        if (totalHours > 0) {
+          rateByStudent[s.id] = totalAmount / totalHours;
+        }
+      }
+    }
+
+    final byWeek = <DateTime, double>{};
+    for (final lesson in upcoming) {
+      final rate = rateByStudent[lesson.studentId] ?? 0;
+      final income = lesson.durationHours * rate;
+      final weekStart = _startOfWeek(lesson.startAt);
+      byWeek[weekStart] = (byWeek[weekStart] ?? 0) + income;
+    }
+
+    return byWeek;
+  }
+
+  Widget _buildExpectedIncomeSection(
+    BuildContext context,
+    Map<DateTime, double> expectedByWeek,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final sortedWeeks = expectedByWeek.keys.toList()..sort();
+    final totalExpected = expectedByWeek.values.fold<double>(0, (a, b) => a + b);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.infoLight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.trending_up_rounded, color: AppTheme.info, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Expected Income',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                  Text(
+                    'From upcoming scheduled lessons',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (totalExpected > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                'Total: £${totalExpected.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.info,
+                ),
+              ),
+            ),
+          ...sortedWeeks.map((weekStart) {
+            final amount = expectedByWeek[weekStart]!;
+            final weekEnd = weekStart.add(const Duration(days: 6));
+            final label = DateFormat('d MMM').format(weekStart) +
+                ' – ' +
+                DateFormat('d MMM yyyy').format(weekEnd);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  Text(
+                    '£${amount.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.success,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 
@@ -177,7 +349,7 @@ class PaymentsScreen extends StatelessWidget {
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: AppTheme.primaryGradient,
+        gradient: context.primaryGradient,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(

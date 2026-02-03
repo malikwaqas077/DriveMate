@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
 
-import '../../../models/user_profile.dart';
-import '../../../theme/app_theme.dart';
-import '../../appearance_screen.dart';
-import '../access_requests_screen.dart';
-import 'cancellation_settings_screen.dart';
-import 'calendar_settings_screen.dart';
-import 'navigation_settings_screen.dart';
-import 'notification_settings_screen.dart';
+import '../../models/user_profile.dart';
+import '../../services/auth_service.dart';
+import '../../theme/app_theme.dart';
+import '../appearance_screen.dart';
+import '../instructor/terms_screen.dart';
+import 'owner_access_requests_screen.dart';
 
-class SettingsMainScreen extends StatelessWidget {
-  const SettingsMainScreen({super.key, required this.instructor});
+class OwnerSettingsScreen extends StatelessWidget {
+  const OwnerSettingsScreen({super.key, required this.owner});
 
-  final UserProfile instructor;
+  final UserProfile owner;
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +39,7 @@ class SettingsMainScreen extends StatelessWidget {
           _buildSettingsSection(
             context,
             title: 'Access Requests',
-            subtitle: 'Manage your school access requests',
+            subtitle: 'Manage instructor access to your school',
             icon: Icons.lock_open_rounded,
             iconColor: AppTheme.primary,
             iconBgColor: AppTheme.primary.withOpacity(0.1),
@@ -49,7 +47,7 @@ class SettingsMainScreen extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => AccessRequestsScreen(instructor: instructor),
+                  builder: (_) => OwnerAccessRequestsScreen(owner: owner),
                 ),
               );
             },
@@ -57,67 +55,26 @@ class SettingsMainScreen extends StatelessWidget {
           const SizedBox(height: 12),
           _buildSettingsSection(
             context,
-            title: 'Notifications',
-            subtitle: 'Reminders and auto-notifications',
-            icon: Icons.notifications_outlined,
-            iconColor: AppTheme.primary,
-            iconBgColor: AppTheme.primary.withOpacity(0.1),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => NotificationSettingsScreen(instructor: instructor),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _buildSettingsSection(
-            context,
-            title: 'Cancellations',
-            subtitle: 'Cancellation rules and charges',
-            icon: Icons.event_busy_rounded,
-            iconColor: AppTheme.warning,
-            iconBgColor: AppTheme.warningLight,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => CancellationSettingsScreen(instructor: instructor),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _buildSettingsSection(
-            context,
-            title: 'Calendar',
-            subtitle: 'View preferences and lesson colors',
-            icon: Icons.calendar_today_outlined,
+            title: 'Terms & Conditions',
+            subtitle: 'View and edit school terms',
+            icon: Icons.description_outlined,
             iconColor: AppTheme.secondary,
             iconBgColor: AppTheme.secondaryLight,
             onTap: () {
+              final schoolId = owner.schoolId ?? '';
+              if (schoolId.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('School not linked yet.')),
+                );
+                return;
+              }
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => CalendarSettingsScreen(instructor: instructor),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _buildSettingsSection(
-            context,
-            title: 'Navigation',
-            subtitle: 'Default navigation app',
-            icon: Icons.navigation_rounded,
-            iconColor: AppTheme.info,
-            iconBgColor: AppTheme.infoLight,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => NavigationSettingsScreen(instructor: instructor),
+                  builder: (_) => TermsScreen(
+                    schoolId: schoolId,
+                    canEdit: true,
+                  ),
                 ),
               );
             },
@@ -128,8 +85,8 @@ class SettingsMainScreen extends StatelessWidget {
             title: 'Appearance',
             subtitle: 'Light, dark, or system theme',
             icon: Icons.palette_outlined,
-            iconColor: AppTheme.primary,
-            iconBgColor: AppTheme.primary.withOpacity(0.1),
+            iconColor: AppTheme.info,
+            iconBgColor: AppTheme.infoLight,
             onTap: () {
               Navigator.push(
                 context,
@@ -138,6 +95,65 @@ class SettingsMainScreen extends StatelessWidget {
                 ),
               );
             },
+          ),
+          const SizedBox(height: 24),
+          _buildSettingsSection(
+            context,
+            title: 'Log out',
+            subtitle: 'Sign out of your account',
+            icon: Icons.logout_rounded,
+            iconColor: AppTheme.error,
+            iconBgColor: AppTheme.errorLight,
+            onTap: () => _showLogoutConfirmation(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLogoutConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppTheme.errorLight,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.logout_rounded,
+                color: AppTheme.error,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 16),
+            const Expanded(child: Text('Log out?')),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to log out of DriveMate?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final navigator = Navigator.of(context, rootNavigator: true);
+              Navigator.pop(context);
+              navigator.popUntil((route) => route.isFirst);
+              await AuthService().signOut();
+            },
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Log out'),
           ),
         ],
       ),

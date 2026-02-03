@@ -221,18 +221,20 @@ class _AuthScreenState extends State<AuthScreen>
 
   @override
   Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final headerGradient = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Color.lerp(primary, Colors.black, 0.3) ?? primary,
+        primary,
+        Color.lerp(primary, Colors.black, 0.15) ?? primary,
+      ],
+    );
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0D7377),
-              Color(0xFF14919B),
-              Color(0xFF1A6B6E),
-            ],
-          ),
+        decoration: BoxDecoration(
+          gradient: headerGradient,
         ),
         child: SafeArea(
           child: Column(
@@ -406,7 +408,7 @@ class _AuthScreenState extends State<AuthScreen>
           style: TextStyle(
             fontSize: 15,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            color: isSelected ? AppTheme.primary : colorScheme.onSurfaceVariant,
+            color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
           ),
         ),
       ),
@@ -745,10 +747,10 @@ class _AuthScreenState extends State<AuthScreen>
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: colorScheme.outlineVariant, width: 1),
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: AppTheme.primary, width: 2),
-      ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: colorScheme.primary, width: 2),
+        ),
       disabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: colorScheme.outlineVariant, width: 1),
@@ -761,15 +763,15 @@ class _AuthScreenState extends State<AuthScreen>
     required VoidCallback? onPressed,
     bool isLoading = false,
   }) {
-    final onPrimary = Theme.of(context).colorScheme.onPrimary;
+    final colorScheme = Theme.of(context).colorScheme;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       height: 56,
       child: FilledButton(
         onPressed: onPressed,
         style: FilledButton.styleFrom(
-          backgroundColor: AppTheme.primary,
-          foregroundColor: onPrimary,
+          backgroundColor: colorScheme.primary,
+          foregroundColor: colorScheme.onPrimary,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
@@ -779,7 +781,7 @@ class _AuthScreenState extends State<AuthScreen>
             ? LoadingIndicator(
                 size: 22,
                 strokeWidth: 2.5,
-                color: onPrimary,
+                color: colorScheme.onPrimary,
               )
             : Text(
                 label,

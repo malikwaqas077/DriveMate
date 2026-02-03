@@ -2,7 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../services/theme_service.dart';
 
-/// App-wide appearance settings: Light, Dark, or follow device (System).
+/// Predefined theme colors users can choose from
+const List<({int value, String label})> _themeColors = [
+  (value: 0xFF14919B, label: 'Teal'),
+  (value: 0xFF3B82F6, label: 'Blue'),
+  (value: 0xFF8B5CF6, label: 'Purple'),
+  (value: 0xFF10B981, label: 'Green'),
+  (value: 0xFFF59E0B, label: 'Amber'),
+  (value: 0xFFE65100, label: 'Orange'),
+  (value: 0xFFEC4899, label: 'Pink'),
+  (value: 0xFF06B6D4, label: 'Cyan'),
+];
+
+/// App-wide appearance settings: Light/Dark/System theme and theme color.
 class AppearanceScreen extends StatefulWidget {
   const AppearanceScreen({super.key});
 
@@ -12,16 +24,23 @@ class AppearanceScreen extends StatefulWidget {
 
 class _AppearanceScreenState extends State<AppearanceScreen> {
   late ThemeMode _selected;
+  late int _selectedColor;
 
   @override
   void initState() {
     super.initState();
     _selected = ThemeService.instance.themeMode;
+    _selectedColor = ThemeService.instance.seedColor;
   }
 
   Future<void> _setTheme(ThemeMode mode) async {
     setState(() => _selected = mode);
     await ThemeService.instance.setThemeMode(mode);
+  }
+
+  Future<void> _setColor(int colorValue) async {
+    setState(() => _selectedColor = colorValue);
+    await ThemeService.instance.setSeedColor(colorValue);
   }
 
   @override
@@ -70,9 +89,70 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
             selected: _selected == ThemeMode.dark,
             onTap: () => _setTheme(ThemeMode.dark),
           ),
+          const SizedBox(height: 32),
+          Text(
+            'Theme color',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Choose an accent color for the whole app',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: _themeColors.map((c) {
+              final isSelected = _selectedColor == c.value;
+              return GestureDetector(
+                onTap: () => _setColor(c.value),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: Color(c.value),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected
+                          ? colorScheme.primary
+                          : colorScheme.outlineVariant,
+                      width: isSelected ? 3 : 1,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: Color(c.value).withOpacity(0.4),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: isSelected
+                      ? Icon(
+                          Icons.check_rounded,
+                          color: _contrastColor(Color(c.value)),
+                          size: 24,
+                        )
+                      : null,
+                ),
+              );
+            }).toList(),
+          ),
         ],
       ),
     );
+  }
+
+  Color _contrastColor(Color bg) {
+    return bg.computeLuminance() > 0.5 ? Colors.black : Colors.white;
   }
 }
 

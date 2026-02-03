@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../models/cancellation_request.dart';
@@ -5,18 +7,18 @@ import '../../models/user_profile.dart';
 import '../../services/auth_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/firestore_service.dart';
+import '../../services/role_preference_service.dart';
 import '../../theme/app_theme.dart';
 import '../chat/conversations_list_screen.dart';
 import '../owner/owner_access_requests_screen.dart';
 import '../owner/owner_instructor_choice_screen.dart';
 import '../owner/owner_instructors_screen.dart';
 import '../owner/owner_reports_screen.dart';
-import 'access_requests_screen.dart';
 import 'calendar_screen.dart';
 import 'cancellation_requests_screen.dart';
 import 'settings/settings_main_screen.dart';
-import 'payments_screen.dart';
-import 'reports_screen.dart';
+import 'money_screen.dart';
+import 'insights_screen.dart';
 import 'students_screen.dart';
 import 'terms_screen.dart';
 
@@ -29,13 +31,14 @@ class InstructorHome extends StatefulWidget {
   State<InstructorHome> createState() => _InstructorHomeState();
 }
 
-class _InstructorHomeState extends State<InstructorHome> {
+class _InstructorHomeState extends State<InstructorHome> with WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
   final ChatService _chatService = ChatService();
   int _currentIndex = 0;
   int _pendingCancellations = 0;
   bool _isOwner = false;
+  StreamSubscription<List<CancellationRequest>>? _cancellationSubscription;
 
   late final List<Widget> _screens;
   late final List<_NavItem> _navItems;
@@ -43,11 +46,12 @@ class _InstructorHomeState extends State<InstructorHome> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _screens = [
       CalendarScreen(instructor: widget.profile),
       StudentsScreen(instructor: widget.profile),
-      PaymentsScreen(instructor: widget.profile),
-      ReportsScreen(instructor: widget.profile),
+      MoneyScreen(instructor: widget.profile),
+      InsightsScreen(instructor: widget.profile),
     ];
     _navItems = const [
       _NavItem(
@@ -63,16 +67,34 @@ class _InstructorHomeState extends State<InstructorHome> {
       _NavItem(
         icon: Icons.account_balance_wallet_outlined,
         activeIcon: Icons.account_balance_wallet_rounded,
-        label: 'Payments',
+        label: 'Money',
       ),
       _NavItem(
-        icon: Icons.analytics_outlined,
-        activeIcon: Icons.analytics_rounded,
-        label: 'Reports',
+        icon: Icons.insights_rounded,
+        activeIcon: Icons.insights_rounded,
+        label: 'Insights',
       ),
     ];
     _listenToPendingCancellations();
     _checkIfOwner();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cancellationSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Pause/resume stream subscription based on app lifecycle
+    if (state == AppLifecycleState.paused) {
+      _cancellationSubscription?.pause();
+    } else if (state == AppLifecycleState.resumed) {
+      _cancellationSubscription?.resume();
+    }
   }
 
   Future<void> _checkIfOwner() async {
@@ -95,11 +117,15 @@ class _InstructorHomeState extends State<InstructorHome> {
   }
 
   void _listenToPendingCancellations() {
-    _firestoreService
+    _cancellationSubscription = _firestoreService
         .streamPendingCancellationRequests(widget.profile.id)
         .listen((requests) {
       if (mounted) {
-        setState(() => _pendingCancellations = requests.length);
+        final newCount = requests.length;
+        // Only call setState if the count actually changed
+        if (_pendingCancellations != newCount) {
+          setState(() => _pendingCancellations = newCount);
+        }
       }
     });
   }
@@ -134,7 +160,7 @@ class _InstructorHomeState extends State<InstructorHome> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
+              gradient: context.primaryGradient,
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
@@ -296,8 +322,7 @@ class _InstructorHomeState extends State<InstructorHome> {
           itemBuilder: (context) => [
             _buildPopupHeader(context),
             const PopupMenuDivider(),
-            if (_isOwner) _buildViewSwitcherMenuItem(context),
-            if (_isOwner) const PopupMenuDivider(),
+            // Top items: Settings, Log out
             _buildPopupItem(
               context,
               icon: Icons.settings_outlined,
@@ -306,10 +331,14 @@ class _InstructorHomeState extends State<InstructorHome> {
             ),
             _buildPopupItem(
               context,
-              icon: Icons.notifications_outlined,
-              label: 'Access requests',
-              value: 'access',
+              icon: Icons.logout_rounded,
+              label: 'Log out',
+              value: 'logout',
+              isDestructive: true,
             ),
+            if (_isOwner) const PopupMenuDivider(),
+            if (_isOwner) _buildViewSwitcherMenuItem(context),
+            if (_isOwner) const PopupMenuDivider(),
             // Owner-only menu items
             if (_isOwner) ...[
               _buildPopupItem(
@@ -337,29 +366,12 @@ class _InstructorHomeState extends State<InstructorHome> {
               label: 'Terms & Conditions',
               value: 'terms',
             ),
-            const PopupMenuDivider(),
-            _buildPopupItem(
-              context,
-              icon: Icons.logout_rounded,
-              label: 'Log out',
-              value: 'logout',
-              isDestructive: true,
-            ),
           ],
           onSelected: (value) {
             if (value == 'settings') {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => SettingsMainScreen(
-                    instructor: widget.profile,
-                  ),
-                ),
-              );
-            }
-            if (value == 'access') {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => AccessRequestsScreen(
                     instructor: widget.profile,
                   ),
                 ),
@@ -638,7 +650,9 @@ class _InstructorHomeState extends State<InstructorHome> {
           ),
           FilledButton(
             onPressed: () async {
+              final navigator = Navigator.of(context, rootNavigator: true);
               Navigator.pop(context);
+              navigator.popUntil((route) => route.isFirst);
               await _authService.signOut();
             },
             style: FilledButton.styleFrom(

@@ -40,6 +40,25 @@ class _CalendarScreenState extends State<CalendarScreen> {
   late final ScrollController _gridScrollController;
   bool _syncingScroll = false;
 
+  // Cached streams - created once in initState
+  late final Stream<UserProfile?> _instructorStream;
+  late final Stream<List<Student>> _studentsStream;
+  late final Stream<List<Lesson>> _lessonsStream;
+  late final Stream<List<Payment>> _paymentsStream;
+
+  // Cached data to avoid unnecessary rebuilds
+  UserProfile? _cachedInstructor;
+  List<Student> _cachedStudents = [];
+  List<Lesson> _cachedLessons = [];
+  List<Payment> _cachedPayments = [];
+  bool _isLoading = true;
+
+  // Stream subscriptions
+  StreamSubscription<UserProfile?>? _instructorSubscription;
+  StreamSubscription<List<Student>>? _studentsSubscription;
+  StreamSubscription<List<Lesson>>? _lessonsSubscription;
+  StreamSubscription<List<Payment>>? _paymentsSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -63,10 +82,113 @@ class _CalendarScreenState extends State<CalendarScreen> {
       }
       _syncingScroll = false;
     });
+
+    // Create streams once and cache them
+    _instructorStream = _firestoreService.streamUserProfile(widget.instructor.id);
+    _studentsStream = _firestoreService.streamStudents(widget.instructor.id);
+    _lessonsStream = _firestoreService.streamLessonsForInstructor(widget.instructor.id);
+    _paymentsStream = _firestoreService.streamPaymentsForInstructor(widget.instructor.id);
+
+    // Subscribe to streams
+    _setupStreamSubscriptions();
+  }
+
+  void _setupStreamSubscriptions() {
+    _instructorSubscription = _instructorStream.listen((instructor) {
+      if (!mounted) return;
+      // Only update if data actually changed
+      if (_instructorChanged(instructor)) {
+        setState(() {
+          _cachedInstructor = instructor;
+        });
+      }
+    });
+
+    _studentsSubscription = _studentsStream.listen((students) {
+      if (!mounted) return;
+      if (_studentsChanged(students)) {
+        setState(() {
+          _cachedStudents = students;
+          _isLoading = false;
+        });
+      }
+    });
+
+    _lessonsSubscription = _lessonsStream.listen((lessons) {
+      if (!mounted) return;
+      if (_lessonsChanged(lessons)) {
+        setState(() {
+          _cachedLessons = lessons;
+          _isLoading = false;
+        });
+      }
+    });
+
+    _paymentsSubscription = _paymentsStream.listen((payments) {
+      if (!mounted) return;
+      if (_paymentsChanged(payments)) {
+        setState(() {
+          _cachedPayments = payments;
+        });
+      }
+    });
+  }
+
+  // Compare functions to prevent unnecessary rebuilds
+  bool _instructorChanged(UserProfile? newInstructor) {
+    if (_cachedInstructor == null && newInstructor == null) return false;
+    if (_cachedInstructor == null || newInstructor == null) return true;
+    return _cachedInstructor!.id != newInstructor.id ||
+           _cachedInstructor!.instructorSettings?.defaultCalendarView != 
+           newInstructor.instructorSettings?.defaultCalendarView ||
+           _cachedInstructor!.instructorSettings?.lessonColors != 
+           newInstructor.instructorSettings?.lessonColors;
+  }
+
+  bool _studentsChanged(List<Student> newStudents) {
+    if (_cachedStudents.length != newStudents.length) return true;
+    for (int i = 0; i < _cachedStudents.length; i++) {
+      if (_cachedStudents[i].id != newStudents[i].id ||
+          _cachedStudents[i].name != newStudents[i].name ||
+          _cachedStudents[i].phone != newStudents[i].phone ||
+          _cachedStudents[i].address != newStudents[i].address) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _lessonsChanged(List<Lesson> newLessons) {
+    if (_cachedLessons.length != newLessons.length) return true;
+    for (int i = 0; i < _cachedLessons.length; i++) {
+      if (_cachedLessons[i].id != newLessons[i].id ||
+          _cachedLessons[i].startAt != newLessons[i].startAt ||
+          _cachedLessons[i].durationHours != newLessons[i].durationHours ||
+          _cachedLessons[i].studentId != newLessons[i].studentId ||
+          _cachedLessons[i].status != newLessons[i].status) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _paymentsChanged(List<Payment> newPayments) {
+    if (_cachedPayments.length != newPayments.length) return true;
+    for (int i = 0; i < _cachedPayments.length; i++) {
+      if (_cachedPayments[i].id != newPayments[i].id ||
+          _cachedPayments[i].hoursPurchased != newPayments[i].hoursPurchased) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @override
   void dispose() {
+    _instructorSubscription?.cancel();
+    _studentsSubscription?.cancel();
+    _lessonsSubscription?.cancel();
+    _paymentsSubscription?.cancel();
     _verticalController.dispose();
     _headerScrollController.dispose();
     _gridScrollController.dispose();
@@ -75,113 +197,84 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<UserProfile?>(
-      stream: _firestoreService.streamUserProfile(widget.instructor.id),
-      builder: (context, instructorSnapshot) {
-        final instructor = instructorSnapshot.data ?? widget.instructor;
-        
-        return StreamBuilder<List<Student>>(
-          stream: _firestoreService.streamStudents(instructor.id),
-          builder: (context, studentsSnapshot) {
-            if (studentsSnapshot.connectionState == ConnectionState.waiting) {
-              return const LoadingView(message: 'Loading calendar...');
-            }
-            final students = studentsSnapshot.data ?? [];
-            final studentMap = {
-              for (final student in students) student.id: student.name,
-            };
-            return StreamBuilder<List<Lesson>>(
-              stream:
-                  _firestoreService.streamLessonsForInstructor(instructor.id),
-              builder: (context, lessonSnapshot) {
-                if (lessonSnapshot.connectionState == ConnectionState.waiting) {
-                  return const LoadingView(message: 'Loading lessons...');
+    if (_isLoading && _cachedStudents.isEmpty && _cachedLessons.isEmpty) {
+      return const LoadingView(message: 'Loading calendar...');
+    }
+
+    final instructor = _cachedInstructor ?? widget.instructor;
+    final students = _cachedStudents;
+    final lessons = _cachedLessons;
+    final payments = _cachedPayments;
+    final studentMap = {
+      for (final student in students) student.id: student.name,
+    };
+    final lessonStatuses = _computeLessonStatuses(lessons, payments);
+    final selectedDay = _selectedDay ?? DateTime.now();
+    final weekDays = _buildWeekDays(_focusedDay);
+    // Get default view from settings
+    final defaultView = instructor.instructorSettings?.defaultCalendarView ?? 'grid';
+    final showList = defaultView == 'list';
+
+    return Scaffold(
+      body: Column(
+        children: [
+          _buildWeekHeader(context, weekDays, selectedDay),
+          Expanded(
+            child: GestureDetector(
+              onHorizontalDragEnd: (details) {
+                // Swipe right (positive velocity) = previous week
+                // Swipe left (negative velocity) = next week
+                const swipeThreshold = 100.0;
+                if (details.primaryVelocity != null) {
+                  if (details.primaryVelocity! > swipeThreshold) {
+                    // Swipe right - go to previous week
+                    setState(() {
+                      _focusedDay = _focusedDay.subtract(const Duration(days: 7));
+                      _selectedDay = _focusedDay;
+                      _didAutoScroll = false;
+                    });
+                  } else if (details.primaryVelocity! < -swipeThreshold) {
+                    // Swipe left - go to next week
+                    setState(() {
+                      _focusedDay = _focusedDay.add(const Duration(days: 7));
+                      _selectedDay = _focusedDay;
+                      _didAutoScroll = false;
+                    });
+                  }
                 }
-                final lessons = lessonSnapshot.data ?? [];
-                return StreamBuilder<List<Payment>>(
-                  stream: _firestoreService
-                      .streamPaymentsForInstructor(instructor.id),
-                  builder: (context, paymentsSnapshot) {
-                    if (paymentsSnapshot.connectionState ==
-                        ConnectionState.waiting) {
-                      return const LoadingView(message: 'Loading payments...');
-                    }
-                    final payments = paymentsSnapshot.data ?? [];
-                    final lessonStatuses =
-                        _computeLessonStatuses(lessons, payments);
-                final selectedDay = _selectedDay ?? DateTime.now();
-                final weekDays = _buildWeekDays(_focusedDay);
-                // Get default view from settings
-                final defaultView = instructor.instructorSettings?.defaultCalendarView ?? 'grid';
-                final showList = defaultView == 'list';
-                return Scaffold(
-                  body: Column(
-                    children: [
-                      _buildWeekHeader(context, weekDays, selectedDay),
-                      Expanded(
-                        child: GestureDetector(
-                          onHorizontalDragEnd: (details) {
-                            // Swipe right (positive velocity) = previous week
-                            // Swipe left (negative velocity) = next week
-                            const swipeThreshold = 100.0;
-                            if (details.primaryVelocity != null) {
-                              if (details.primaryVelocity! > swipeThreshold) {
-                                // Swipe right - go to previous week
-                                setState(() {
-                                  _focusedDay = _focusedDay.subtract(const Duration(days: 7));
-                                  _selectedDay = _focusedDay;
-                                  _didAutoScroll = false;
-                                });
-                              } else if (details.primaryVelocity! < -swipeThreshold) {
-                                // Swipe left - go to next week
-                                setState(() {
-                                  _focusedDay = _focusedDay.add(const Duration(days: 7));
-                                  _selectedDay = _focusedDay;
-                                  _didAutoScroll = false;
-                                });
-                              }
-                            }
-                          },
-                          child: showList
-                              ? _buildLessonList(
-                                  lessons,
-                                  weekDays,
-                                  students,
-                                  studentMap,
-                                  lessonStatuses,
-                                )
-                              : _buildWeekGrid(
-                                  context,
-                                  weekDays,
-                                  lessons,
-                                  students,
-                                  studentMap,
-                                  selectedDay,
-                                  lessonStatuses,
-                                  instructor: instructor,
-                                ),
-                        ),
-                      ),
-                        ],
-                      ),
-                      floatingActionButton: FloatingActionButton(
-                        onPressed: students.isEmpty
-                            ? null
-                            : () => _showAddLesson(
-                                  context,
-                                  students,
-                                  selectedDay,
-                                ),
-                        child: const Icon(Icons.add),
-                      ),
-                    );
-                  },
-                );
               },
-            );
-          },
-        );
-      },
+              child: showList
+                  ? _buildLessonList(
+                      lessons,
+                      weekDays,
+                      students,
+                      studentMap,
+                      lessonStatuses,
+                    )
+                  : _buildWeekGrid(
+                      context,
+                      weekDays,
+                      lessons,
+                      students,
+                      studentMap,
+                      selectedDay,
+                      lessonStatuses,
+                      instructor: instructor,
+                    ),
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: students.isEmpty
+            ? null
+            : () => _showAddLesson(
+                  context,
+                  students,
+                  selectedDay,
+                ),
+        child: const Icon(Icons.add),
+      ),
     );
   }
 
@@ -564,26 +657,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final currentInstructor = instructor ?? widget.instructor;
     _maybeAutoScrollToLessons(lessons, weekDays, startHour);
     
-    // Debug: Log week days and lessons
-    debugPrint('[calendar] Building lesson blocks for week: ${weekDays.map((d) => '${d.year}-${d.month}-${d.day}').join(', ')}');
-    debugPrint('[calendar] Total lessons: ${lessons.length}, startHour: $startHour');
-    
     final filteredLessons = lessons
         .where((lesson) =>
             weekDays.any((day) => _isSameDay(day, lesson.startAt)))
         .toList();
-    
-    debugPrint('[calendar] Filtered lessons for week: ${filteredLessons.length}');
-    for (final lesson in filteredLessons) {
-      debugPrint('[calendar] Lesson: ${lesson.startAt.toIso8601String()}, student: ${studentMap[lesson.studentId]}');
-    }
     
     return filteredLessons.map((lesson) {
       final dayIndex = weekDays.indexWhere(
         (day) => _isSameDay(day, lesson.startAt),
       );
       if (dayIndex < 0) {
-        debugPrint('[calendar] Lesson ${lesson.id} dayIndex < 0');
         return const SizedBox.shrink();
       }
       // Normalize lesson start time to local date for accurate calculation
@@ -603,24 +686,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
       // Allow lessons that start slightly before startHour (within reason) to still show
       // This handles edge cases where lessons are at the boundary
       if (top < -_hourHeight || top > maxHeight + _hourHeight) {
-        debugPrint(
-          '[calendar] lesson out of range id=${lesson.id} '
-          'start=${lesson.startAt.toIso8601String()} '
-          'hour=${lesson.startAt.hour}:${lesson.startAt.minute.toString().padLeft(2, '0')} '
-          'top=$top maxHeight=$maxHeight '
-          'range=${startHour.toString().padLeft(2, '0')}:00-'
-          '${_endHour.toString().padLeft(2, '0')}:00',
-        );
         return const SizedBox.shrink();
       }
       
       // Clamp the top position to ensure it's visible
       final clampedTop = top.clamp(0.0, maxHeight);
-      
-      debugPrint(
-        '[calendar] Rendering lesson ${lesson.id} at top=$clampedTop, '
-        'dayIndex=$dayIndex, hour=${lesson.startAt.hour}:${lesson.startAt.minute.toString().padLeft(2, '0')}',
-      );
       final height = lesson.durationHours * _hourHeight;
       final left = dayIndex * dayWidth + 4;
       final status = lessonStatuses[lesson.id];
@@ -629,6 +699,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       final isPast = _isLessonPast(lesson);
       final backgroundColor = _lessonColor(
         lessonType: lesson.lessonType,
+        lessonStatus: lesson.status,
         isPast: isPast,
         instructor: currentInstructor,
       );
@@ -783,10 +854,25 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   Color _lessonColor({
     required String lessonType,
+    required String lessonStatus,
     required bool isPast,
     UserProfile? instructor,
   }) {
-    // Get custom colors from settings, or use defaults
+    // If lesson is completed (either explicitly marked or past and not cancelled), show green
+    final isCompleted = lessonStatus == 'completed' || 
+        (isPast && lessonStatus == 'scheduled');
+    
+    // If cancelled, show grey
+    if (lessonStatus == 'cancelled') {
+      return Colors.grey.withOpacity(0.7);
+    }
+    
+    // Completed lessons are green
+    if (isCompleted) {
+      return const Color(0xFF4CAF50).withOpacity(0.9); // Green
+    }
+    
+    // Get custom colors from settings, or use defaults for scheduled lessons
     final currentInstructor = instructor ?? widget.instructor;
     final settings = currentInstructor.instructorSettings;
     final savedColors = settings?.lessonColors;
@@ -817,7 +903,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       }
     }
     
-    return base.withOpacity(isPast ? 0.85 : 0.9);
+    return base.withOpacity(0.9);
   }
 
   String _lessonTypeLabel(String lessonType, {UserProfile? instructor}) {
@@ -1153,9 +1239,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     _openNavigation(student.address!, lesson, student);
                   },
                 ),
-                const Divider(),
-                _buildNotificationButtons(context, lesson, student),
               ],
+              const Divider(),
+              _buildNotificationButtons(context, lesson, student),
             ],
           ),
         );
@@ -1978,8 +2064,9 @@ class _NowIndicator extends StatefulWidget {
   State<_NowIndicator> createState() => _NowIndicatorState();
 }
 
-class _NowIndicatorState extends State<_NowIndicator> {
+class _NowIndicatorState extends State<_NowIndicator> with WidgetsBindingObserver {
   Timer? _timer;
+  bool _isAppActive = true;
 
   bool _isSameDay(DateTime a, DateTime b) {
     // Normalize both dates to local time and compare only date components
@@ -1991,9 +2078,15 @@ class _NowIndicatorState extends State<_NowIndicator> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
     // Update every minute to move the indicator
     _timer = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) {
+      if (mounted && _isAppActive) {
         setState(() {});
       }
     });
@@ -2001,8 +2094,27 @@ class _NowIndicatorState extends State<_NowIndicator> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      // Stop timer when app goes to background
+      _isAppActive = false;
+      _timer?.cancel();
+      _timer = null;
+    } else if (state == AppLifecycleState.resumed) {
+      // Restart timer when app comes back to foreground
+      _isAppActive = true;
+      if (mounted) {
+        setState(() {}); // Refresh the indicator position
+      }
+      _startTimer();
+    }
   }
 
   @override

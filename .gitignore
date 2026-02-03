@@ -38,6 +38,10 @@ ui-debug.log
 .env
 .env.local
 
+# Keystore credentials - never commit
+KEYSTORE-CREDENTIALS-SAVE-THIS.txt
+PlayStore-Keys/
+
 # Logs
 *.log
 npm-debug.log*

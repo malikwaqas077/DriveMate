@@ -25,6 +25,7 @@ import 'services/auth_service.dart';
 import 'services/fcm_service.dart';
 import 'services/firestore_service.dart';
 import 'services/notification_service.dart';
+import 'services/role_preference_service.dart';
 import 'services/theme_service.dart';
 import 'theme/app_theme.dart';
 import 'widgets/loading_view.dart';
@@ -38,9 +39,13 @@ class DriveMateApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: ThemeService.instance.notifier,
+      listenable: Listenable.merge([
+        ThemeService.instance.notifier,
+        ThemeService.instance.seedColorNotifier,
+      ]),
       builder: (context, _) {
         final mode = ThemeService.instance.themeMode;
+        final seedColor = ThemeService.instance.seedColor;
         final brightness = mode == ThemeMode.system
             ? WidgetsBinding.instance.platformDispatcher.platformBrightness
             : (mode == ThemeMode.dark ? Brightness.dark : Brightness.light);
@@ -63,8 +68,8 @@ class DriveMateApp extends StatelessWidget {
           title: 'DriveMate',
           debugShowCheckedModeBanner: false,
           navigatorKey: navigatorKey,
-          theme: AppTheme.lightTheme,
-          darkTheme: AppTheme.darkTheme,
+          theme: AppTheme.lightTheme(seedColor),
+          darkTheme: AppTheme.darkTheme(seedColor),
           themeMode: mode,
           home: const AuthGate(),
         );
@@ -521,9 +526,28 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
                       );
                     }
                     final isAlsoInstructor = instructorCheckSnapshot.data ?? false;
-                    // If owner is also instructor, show choice screen so they can pick Owner or Instructor view
+                    // If owner is also instructor, check saved preference or show choice screen
                     if (isAlsoInstructor) {
-                      return OwnerInstructorChoiceScreen(profile: profile);
+                      return FutureBuilder<String?>(
+                        future: RolePreferenceService.instance.getPreferredRole(profile.id),
+                        builder: (context, preferenceSnapshot) {
+                          if (preferenceSnapshot.connectionState == ConnectionState.waiting) {
+                            return const LoadingView(
+                              message: 'Loading...',
+                              showLogo: true,
+                            );
+                          }
+                          final preferredRole = preferenceSnapshot.data;
+                          // If preference exists and is valid, use it; otherwise show choice screen
+                          if (preferredRole == 'owner') {
+                            return OwnerHome(profile: profile);
+                          } else if (preferredRole == 'instructor') {
+                            return InstructorHome(profile: profile);
+                          }
+                          // No preference saved, show choice screen
+                          return OwnerInstructorChoiceScreen(profile: profile);
+                        },
+                      );
                     }
                     return OwnerHome(profile: profile);
                   },

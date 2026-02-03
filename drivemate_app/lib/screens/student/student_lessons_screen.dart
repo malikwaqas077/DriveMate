@@ -163,7 +163,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        gradient: AppTheme.primaryGradient,
+        gradient: context.primaryGradient,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
@@ -745,10 +745,13 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
       backgroundColor: Colors.transparent,
       builder: (context) {
         final colorScheme = Theme.of(context).colorScheme;
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return Container(
-              height: MediaQuery.of(context).size.height * 0.7,
+        final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.only(bottom: viewInsets),
+          child: StatefulBuilder(
+            builder: (context, setDialogState) {
+              return Container(
+                height: MediaQuery.of(context).size.height * 0.7,
               decoration: BoxDecoration(
                 color: colorScheme.surface,
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -888,6 +891,7 @@ class _StudentLessonsScreenState extends State<StudentLessonsScreen> {
               ),
             );
           },
+        ),
         );
       },
     );

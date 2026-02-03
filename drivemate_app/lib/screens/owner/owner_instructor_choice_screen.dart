@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/user_profile.dart';
+import '../../services/role_preference_service.dart';
 import '../../theme/app_theme.dart';
 import 'owner_home.dart';
 import '../instructor/instructor_home.dart';
@@ -15,7 +16,9 @@ class OwnerInstructorChoiceScreen extends StatelessWidget {
 
   final UserProfile profile;
 
-  static void openAsOwner(BuildContext context, UserProfile profile) {
+  static void openAsOwner(BuildContext context, UserProfile profile) async {
+    // Save preference
+    await RolePreferenceService.instance.savePreferredRole(profile.id, 'owner');
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => OwnerHome(profile: profile),
@@ -23,7 +26,9 @@ class OwnerInstructorChoiceScreen extends StatelessWidget {
     );
   }
 
-  static void openAsInstructor(BuildContext context, UserProfile profile) {
+  static void openAsInstructor(BuildContext context, UserProfile profile) async {
+    // Save preference
+    await RolePreferenceService.instance.savePreferredRole(profile.id, 'instructor');
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => InstructorHome(profile: profile),

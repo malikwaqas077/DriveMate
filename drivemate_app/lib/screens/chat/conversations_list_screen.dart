@@ -408,7 +408,7 @@ class _StudentPickerBottomSheet extends StatelessWidget {
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              gradient: AppTheme.primaryGradient,
+                              gradient: context.primaryGradient,
                               shape: BoxShape.circle,
                             ),
                             child: Center(
@@ -548,7 +548,7 @@ class _ConversationTileState extends State<_ConversationTile> {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
+                  gradient: context.primaryGradient,
                   shape: BoxShape.circle,
                 ),
                 child: Center(

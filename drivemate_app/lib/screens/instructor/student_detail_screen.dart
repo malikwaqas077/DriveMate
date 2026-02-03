@@ -29,6 +29,28 @@ class StudentDetailScreen extends StatefulWidget {
   State<StudentDetailScreen> createState() => _StudentDetailScreenState();
 }
 
+class _StudentFinanceSummary {
+  const _StudentFinanceSummary({
+    required this.totalPaidHours,
+    required this.totalPaidAmount,
+    required this.completedHours,
+    required this.upcomingHours,
+    required this.completedLessons,
+    required this.upcomingLessons,
+    required this.totalLessons,
+    required this.availableCredit,
+  });
+
+  final double totalPaidHours;
+  final double totalPaidAmount;
+  final double completedHours;
+  final double upcomingHours;
+  final List<Lesson> completedLessons;
+  final List<Lesson> upcomingLessons;
+  final int totalLessons;
+  final double availableCredit;
+}
+
 class _StudentDetailScreenState extends State<StudentDetailScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final _currencyFormat = NumberFormat.currency(symbol: '£');
@@ -38,7 +60,6 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
   final Map<String, TextEditingController> _paymentAmountControllers = {};
   final Map<String, TextEditingController> _paymentHoursControllers = {};
 
-  bool _detailsExpanded = false;
   bool _loginDetailsExpanded = false;
 
   @override
@@ -84,26 +105,85 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
           if (student == null) {
             return const Center(child: Text('Student not found.'));
           }
-          return ListView(
-            key: const ValueKey('student_detail_scroll'),
-            controller: _scrollController,
-            padding: const EdgeInsets.all(16),
-            children: [
-              _buildHeaderSection(context, student),
-              const SizedBox(height: 16),
-              _buildQuickStats(context, student),
-              const SizedBox(height: 16),
-              _buildLessonsSection(context, student),
-              const SizedBox(height: 16),
-              _buildPaymentsSection(context, student),
-              const SizedBox(height: 16),
-              _buildCollapsibleDetailsCard(context, student),
-              const SizedBox(height: 16),
-              _buildCollapsibleLoginCard(context),
-            ],
+          return StreamBuilder<List<Lesson>>(
+            stream: _firestoreService.streamLessonsForStudent(widget.studentId),
+            builder: (context, lessonSnapshot) {
+              if (lessonSnapshot.connectionState == ConnectionState.waiting) {
+                return const LoadingView(message: 'Loading lessons...');
+              }
+              final lessons = lessonSnapshot.data ?? [];
+              return StreamBuilder<List<Payment>>(
+                stream: _firestoreService.streamPaymentsForStudent(widget.studentId),
+                builder: (context, paymentSnapshot) {
+                  if (paymentSnapshot.connectionState == ConnectionState.waiting) {
+                    return const LoadingView(message: 'Loading payments...');
+                  }
+                  final payments = paymentSnapshot.data ?? [];
+                  final summary = _buildFinanceSummary(lessons, payments);
+
+                  return ListView(
+                    key: const ValueKey('student_detail_scroll'),
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      _buildHeaderSection(context, student),
+                      const SizedBox(height: 16),
+                      _buildQuickStats(context, student, summary),
+                      const SizedBox(height: 16),
+                      _buildOverviewSection(context, student, summary, payments),
+                      const SizedBox(height: 16),
+                      _buildUpcomingLessonsSection(context, summary),
+                      const SizedBox(height: 16),
+                      _buildCollapsibleLoginCard(context),
+                    ],
+                  );
+                },
+              );
+            },
           );
         },
       ),
+    );
+  }
+
+  _StudentFinanceSummary _buildFinanceSummary(
+    List<Lesson> lessons,
+    List<Payment> payments,
+  ) {
+    final now = DateTime.now();
+    final activeLessons = lessons.where((lesson) => lesson.status != 'cancelled').toList();
+    final completedLessons = activeLessons.where((lesson) => !lesson.startAt.isAfter(now)).toList()
+      ..sort((a, b) => b.startAt.compareTo(a.startAt));
+    final upcomingLessons = activeLessons.where((lesson) => lesson.startAt.isAfter(now)).toList()
+      ..sort((a, b) => a.startAt.compareTo(b.startAt));
+
+    final completedHours = completedLessons.fold<double>(
+      0,
+      (total, lesson) => total + lesson.durationHours,
+    );
+    final upcomingHours = upcomingLessons.fold<double>(
+      0,
+      (total, lesson) => total + lesson.durationHours,
+    );
+    final totalPaidHours = payments.fold<double>(
+      0,
+      (total, payment) => total + payment.hoursPurchased,
+    );
+    final totalPaidAmount = payments.fold<double>(
+      0,
+      (total, payment) => total + payment.amount,
+    );
+    final availableCredit = totalPaidHours - completedHours;
+
+    return _StudentFinanceSummary(
+      totalPaidHours: totalPaidHours,
+      totalPaidAmount: totalPaidAmount,
+      completedHours: completedHours,
+      upcomingHours: upcomingHours,
+      completedLessons: completedLessons,
+      upcomingLessons: upcomingLessons,
+      totalLessons: activeLessons.length,
+      availableCredit: availableCredit,
     );
   }
 
@@ -129,7 +209,7 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
+              gradient: context.primaryGradient,
               borderRadius: BorderRadius.circular(16),
             ),
             child: Center(
@@ -189,13 +269,20 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
     );
   }
 
-  Widget _buildQuickStats(BuildContext context, Student student) {
+  Widget _buildQuickStats(
+    BuildContext context,
+    Student student,
+    _StudentFinanceSummary summary,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
-    final balanceColor = student.balanceHours < 0
+    final balanceColor = summary.availableCredit < 0
         ? AppTheme.error
-        : student.balanceHours > 0
+        : summary.availableCredit > 0
             ? AppTheme.success
             : colorScheme.onSurfaceVariant;
+    final upcomingColor = summary.upcomingHours > 0
+        ? AppTheme.info
+        : colorScheme.onSurfaceVariant;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -211,7 +298,7 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Balance',
+                  'Credit',
                   style: TextStyle(
                     fontSize: 12,
                     color: colorScheme.onSurfaceVariant,
@@ -219,11 +306,39 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${student.balanceHours.toStringAsFixed(1)} hours',
+                  '${summary.availableCredit.toStringAsFixed(1)} hours',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
                     color: balanceColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 1,
+            height: 40,
+            color: colorScheme.outlineVariant,
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Upcoming',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${summary.upcomingHours.toStringAsFixed(1)} hours',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: upcomingColor,
                   ),
                 ),
               ],
@@ -264,17 +379,139 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
               ],
             ),
           ),
-          Container(
-            width: 1,
-            height: 40,
-            color: colorScheme.outlineVariant,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewSection(
+    BuildContext context,
+    Student student,
+    _StudentFinanceSummary summary,
+    List<Payment> payments,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final hasCompletedLessons = summary.completedLessons.isNotEmpty;
+    final hasPayments = payments.isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            context,
+            'Overview',
+            Icons.insights_outlined,
+            AppTheme.info,
+            AppTheme.infoLight,
           ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatItem(
+                  context,
+                  label: 'Completed',
+                  value: '${summary.completedLessons.length}',
+                  icon: Icons.event_available_rounded,
+                  iconColor: AppTheme.success,
+                  iconBgColor: AppTheme.successLight,
+                  onTap: hasCompletedLessons
+                      ? () => _showLessonsSheet(context, summary)
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatItem(
+                  context,
+                  label: 'Total Lessons',
+                  value: '${summary.totalLessons}',
+                  icon: Icons.calendar_month_rounded,
+                  iconColor: AppTheme.info,
+                  iconBgColor: AppTheme.infoLight,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatItem(
+                  context,
+                  label: 'Total Spent',
+                  value: _currencyFormat.format(summary.totalPaidAmount),
+                  icon: Icons.payments_rounded,
+                  iconColor: const Color(0xFF8B5CF6),
+                  iconBgColor: const Color(0xFF8B5CF6).withOpacity(0.18),
+                  onTap: () => _showPaymentsSheet(
+                    context,
+                    student,
+                    payments,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatItem(
+                  context,
+                  label: 'Hourly Rate',
+                  value: student.hourlyRate != null
+                      ? '£${student.hourlyRate!.toStringAsFixed(0)}'
+                      : 'N/A',
+                  icon: Icons.speed_rounded,
+                  iconColor: AppTheme.secondary,
+                  iconBgColor: AppTheme.secondaryLight,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatItem(
+    BuildContext context, {
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color iconColor,
+    required Color iconBgColor,
+    VoidCallback? onTap,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final card = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: iconBgColor,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Rate',
+                  label,
                   style: TextStyle(
                     fontSize: 12,
                     color: colorScheme.onSurfaceVariant,
@@ -282,9 +519,7 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  student.hourlyRate != null
-                      ? '£${student.hourlyRate!.toStringAsFixed(2)}/h'
-                      : 'Not set',
+                  value,
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -297,118 +532,242 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
         ],
       ),
     );
+    if (onTap == null) return card;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: card,
+    );
   }
 
-  Widget _buildLessonsSection(BuildContext context, Student student) {
-    return StreamBuilder<List<Lesson>>(
-      stream: _firestoreService.streamLessonsForStudent(widget.studentId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const LoadingView(message: 'Loading lessons...');
-        }
-        final lessons = snapshot.data ?? [];
-        final upcoming = lessons
-            .where((l) => l.status != 'cancelled' && l.startAt.isAfter(DateTime.now()))
-            .toList()
-          ..sort((a, b) => a.startAt.compareTo(b.startAt));
-        final past = lessons
-            .where((l) => l.status != 'cancelled' && !l.startAt.isAfter(DateTime.now()))
-            .toList()
-          ..sort((a, b) => b.startAt.compareTo(a.startAt));
+  Widget _buildUpcomingLessonsSection(
+    BuildContext context,
+    _StudentFinanceSummary summary,
+  ) {
+    final upcoming = summary.upcomingLessons;
+    final colorScheme = Theme.of(context).colorScheme;
 
-        final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            context,
+            'Upcoming Lessons',
+            Icons.event_outlined,
+            AppTheme.info,
+            AppTheme.infoLight,
+          ),
+          const SizedBox(height: 16),
+          if (upcoming.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(
+                'No upcoming lessons scheduled.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            )
+          else
+            ...upcoming.map((lesson) => _buildLessonItem(context, lesson)),
+        ],
+      ),
+    );
+  }
+
+  void _showLessonsSheet(BuildContext context, _StudentFinanceSummary summary) {
+    final upcoming = summary.upcomingLessons;
+    final completed = summary.completedLessons;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        final mediaQuery = MediaQuery.of(sheetContext);
+
         return Container(
-          padding: const EdgeInsets.all(20),
+          height: mediaQuery.size.height * 0.85,
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: colorScheme.outlineVariant),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildSectionHeader(
-                    context,
-                    'Lessons',
-                    Icons.calendar_today_outlined,
-                    AppTheme.primary,
-                    AppTheme.primaryLight,
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: colorScheme.outlineVariant),
                   ),
-                  FilledButton.icon(
-                    onPressed: () => _showAddPayment(context, student),
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add Payment'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'Lesson Overview',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.onSurface,
                       ),
                     ),
-                  ),
-                ],
+                    const Spacer(),
+                    IconButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      icon: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 20),
-              if (upcoming.isEmpty && past.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  child: Text(
-                    'No lessons yet.',
-                    style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    textAlign: TextAlign.center,
+              Expanded(
+                child: (upcoming.isEmpty && completed.isEmpty)
+                    ? Center(
+                        child: Text(
+                          'No lessons recorded yet.',
+                          style: TextStyle(color: colorScheme.onSurfaceVariant),
+                        ),
+                      )
+                    : ListView(
+                        padding: const EdgeInsets.all(20),
+                        children: [
+                          if (upcoming.isNotEmpty) ...[
+                            Text(
+                              'Upcoming',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            ...upcoming.map((lesson) => _buildLessonItem(sheetContext, lesson)),
+                            const SizedBox(height: 20),
+                          ],
+                          if (completed.isNotEmpty) ...[
+                            Text(
+                              'Completed',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            ...completed.map((lesson) => _buildLessonItem(sheetContext, lesson)),
+                          ],
+                        ],
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPaymentsSheet(
+    BuildContext context,
+    Student student,
+    List<Payment> payments,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        final mediaQuery = MediaQuery.of(sheetContext);
+        final instructorId = widget.instructorId ?? student.instructorId;
+
+        return Container(
+          height: mediaQuery.size.height * 0.85,
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: colorScheme.outlineVariant),
                   ),
-                )
-              else ...[
-                if (upcoming.isNotEmpty) ...[
-                  Text(
-                    'Upcoming',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurfaceVariant,
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'Payments',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.onSurface,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...upcoming.take(3).map((lesson) => _buildLessonItem(context, lesson)),
-                  if (upcoming.length > 3)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        '+ ${upcoming.length - 3} more upcoming',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: colorScheme.onSurfaceVariant,
+                    const Spacer(),
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        _showAddPayment(context, student);
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add Payment'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                     ),
-                  if (past.isNotEmpty) const SizedBox(height: 16),
-                ],
-                if (past.isNotEmpty) ...[
-                  Text(
-                    'Recent',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurfaceVariant,
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      icon: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...past.take(3).map((lesson) => _buildLessonItem(context, lesson)),
-                  if (past.length > 3)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        '+ ${past.length - 3} more past',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: colorScheme.onSurfaceVariant,
+                  ],
+                ),
+              ),
+              Expanded(
+                child: StreamBuilder<UserProfile?>(
+                  stream: instructorId != null
+                      ? _firestoreService.streamUserProfile(instructorId)
+                      : null,
+                  builder: (streamContext, instructorSnapshot) {
+                    final instructor = instructorSnapshot.data;
+                    if (payments.isEmpty) {
+                      return Center(
+                        child: Text(
+                          'No payments recorded yet.',
+                          style: TextStyle(color: colorScheme.onSurfaceVariant),
                         ),
-                      ),
-                    ),
-                ],
-              ],
+                      );
+                    }
+                    return ListView.separated(
+                      padding: const EdgeInsets.all(20),
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemCount: payments.length,
+                      itemBuilder: (_, index) {
+                        final payment = payments[index];
+                        return _buildPaymentItem(
+                          streamContext,
+                          payment,
+                          instructor: instructor,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
             ],
           ),
         );
@@ -461,6 +820,8 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
     final colorScheme = Theme.of(context).colorScheme;
     final timeRange = _formatLessonTimeRange(lesson);
     final isPast = lesson.startAt.isBefore(DateTime.now());
+    final reflection = lesson.studentReflection?.trim();
+    final hasReflection = reflection != null && reflection.isNotEmpty;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -470,155 +831,144 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Date block – same as student app: day number + month
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: isPast
-                  ? colorScheme.surfaceContainerHighest
-                  : colorScheme.primary.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  DateFormat('d').format(lesson.startAt),
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: isPast ? colorScheme.onSurfaceVariant : colorScheme.primary,
-                  ),
+          Row(
+            children: [
+              // Date block – same as student app: day number + month
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: isPast
+                      ? colorScheme.surfaceContainerHighest
+                      : colorScheme.primary.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                Text(
-                  DateFormat('MMM').format(lesson.startAt).toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: isPast ? colorScheme.onSurfaceVariant : colorScheme.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 14),
-          // Day, time, duration – aligned like student app
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Expanded(
-                      child: Text(
-                        DateFormat('EEEE').format(lesson.startAt),
+                    Text(
+                      DateFormat('d').format(lesson.startAt),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: isPast ? colorScheme.onSurfaceVariant : colorScheme.primary,
+                      ),
+                    ),
+                    Text(
+                      DateFormat('MMM').format(lesson.startAt).toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: isPast ? colorScheme.onSurfaceVariant : colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 14),
+              // Day, time, duration – aligned like student app
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            DateFormat('EEEE').format(lesson.startAt),
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                        ),
+                        _buildLessonTypeBadge(lesson.lessonType),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.access_time_rounded,
+                          size: 14,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          timeRange,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Icon(
+                          Icons.hourglass_bottom_rounded,
+                          size: 14,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${lesson.durationHours.toStringAsFixed(1)}h',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (isPast && hasReflection) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.edit_note_rounded, size: 14, color: AppTheme.warning),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Student Reflection',
                         style: TextStyle(
-                          fontSize: 15,
+                          fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: colorScheme.onSurface,
+                          color: colorScheme.onSurfaceVariant,
                         ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    reflection!,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: colorScheme.onSurface,
+                      height: 1.4,
                     ),
-                    _buildLessonTypeBadge(lesson.lessonType),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.access_time_rounded,
-                      size: 14,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      timeRange,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Icon(
-                      Icons.hourglass_bottom_rounded,
-                      size: 14,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${lesson.durationHours.toStringAsFixed(1)}h',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
   }
-
-  Widget _buildCollapsibleDetailsCard(BuildContext context, Student student) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: ExpansionTile(
-        initiallyExpanded: _detailsExpanded,
-        onExpansionChanged: (expanded) {
-          setState(() => _detailsExpanded = expanded);
-        },
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: colorScheme.primaryContainer,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(Icons.person_outline, color: colorScheme.primary, size: 20),
-        ),
-        title: Text(
-          'Details',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-            color: colorScheme.onSurface,
-          ),
-        ),
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: Column(
-              children: [
-                _buildDetailRow(context, Icons.email_outlined, 'Email', student.email ?? 'Not set'),
-                const SizedBox(height: 16),
-                _buildDetailRow(context, Icons.phone_outlined, 'Phone', student.phone ?? 'Not set'),
-                if (student.licenseNumber != null && student.licenseNumber!.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _buildDetailRow(context, Icons.badge_outlined, 'License', student.licenseNumber!),
-                ],
-                if (student.address != null && student.address!.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _buildDetailRow(context, Icons.location_on_outlined, 'Address', student.address!),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
 
   Widget _buildDetailRow(
     BuildContext context,
@@ -691,6 +1041,55 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildEditProfileExpandableSection(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required bool expanded,
+    required ValueChanged<bool> onExpandedChanged,
+    required Widget child,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: expanded,
+          onExpansionChanged: onExpandedChanged,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Row(
+            children: [
+              Icon(Icons.expand_more, color: colorScheme.onSurfaceVariant, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              subtitle,
+              style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+            ),
+          ),
+          children: [child],
+        ),
+      ),
     );
   }
 
@@ -870,71 +1269,6 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
     final message = 'Your DriveMate login details:\n${profile.phone != null ? "Phone Number" : "Email"}: $identifier\nPassword: $password';
     
     await Share.share(message, subject: 'DriveMate login details');
-  }
-
-  Widget _buildPaymentsSection(BuildContext context, Student student) {
-    return StreamBuilder<List<Payment>>(
-      stream: _firestoreService.streamPaymentsForStudent(widget.studentId),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          debugPrint('[payments] error: ${snapshot.error}');
-        }
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const LoadingView(message: 'Loading payments...');
-        }
-        final payments = snapshot.data ?? [];
-        // Get instructor profile for custom payment methods
-        final instructorId = widget.instructorId ?? student.instructorId;
-        
-        final colorScheme = Theme.of(context).colorScheme;
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: colorScheme.outlineVariant),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionHeader(
-                context,
-                'Payments',
-                Icons.payments_outlined,
-                AppTheme.success,
-                AppTheme.successLight,
-              ),
-              const SizedBox(height: 20),
-              if (payments.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  child: Text(
-                    'No payments yet.',
-                    style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              else
-                StreamBuilder<UserProfile?>(
-                  stream: instructorId != null
-                      ? _firestoreService.streamUserProfile(instructorId)
-                      : null,
-                  builder: (context, instructorSnapshot) {
-                    final instructor = instructorSnapshot.data;
-                    return Column(
-                      children: payments.map((payment) => _buildPaymentItem(
-                        context,
-                        payment,
-                        instructor: instructor,
-                      )).toList(),
-                    );
-                  },
-                ),
-            ],
-          ),
-        );
-      },
-    );
   }
 
   Widget _buildPaymentItem(BuildContext context, Payment payment, {UserProfile? instructor}) {
@@ -1257,6 +1591,7 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
     );
     String status = student.status;
     bool saving = false;
+    bool optionalExpanded = false;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1314,15 +1649,6 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                           ),
                           const SizedBox(height: 16),
                           TextField(
-                            controller: emailController,
-                            decoration: const InputDecoration(
-                              labelText: 'Email',
-                              prefixIcon: Icon(Icons.email_outlined),
-                            ),
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
                             controller: phoneController,
                             decoration: const InputDecoration(
                               labelText: 'Phone Number',
@@ -1330,49 +1656,71 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                             ),
                             keyboardType: TextInputType.phone,
                           ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: licenseController,
-                            decoration: const InputDecoration(
-                              labelText: 'License Number',
-                              prefixIcon: Icon(Icons.badge_outlined),
+                          const SizedBox(height: 24),
+                          _buildEditProfileExpandableSection(
+                            context,
+                            title: 'Additional details (optional)',
+                            subtitle: 'Email, address, licence, rate, status',
+                            expanded: optionalExpanded,
+                            onExpandedChanged: (v) => setDialogState(() => optionalExpanded = v),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                TextField(
+                                  controller: emailController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Email',
+                                    prefixIcon: Icon(Icons.email_outlined),
+                                  ),
+                                  keyboardType: TextInputType.emailAddress,
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: addressController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Address (optional)',
+                                    prefixIcon: Icon(Icons.location_on_outlined),
+                                    helperText: 'For navigation to pickup',
+                                  ),
+                                  maxLines: 2,
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: licenseController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'License Number',
+                                    prefixIcon: Icon(Icons.badge_outlined),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: rateController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Hourly Rate (£)',
+                                    prefixIcon: Icon(Icons.payments_outlined),
+                                  ),
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                ),
+                                const SizedBox(height: 16),
+                                DropdownButtonFormField<String>(
+                                  value: status,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Status',
+                                    prefixIcon: Icon(Icons.flag_outlined),
+                                  ),
+                                  items: const [
+                                    DropdownMenuItem(value: 'active', child: Text('Active')),
+                                    DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
+                                    DropdownMenuItem(value: 'passed', child: Text('Passed')),
+                                  ],
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      setDialogState(() => status = value);
+                                    }
+                                  },
+                                ),
+                              ],
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: addressController,
-                            decoration: const InputDecoration(
-                              labelText: 'Address',
-                              prefixIcon: Icon(Icons.location_on_outlined),
-                            ),
-                            maxLines: 2,
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: rateController,
-                            decoration: const InputDecoration(
-                              labelText: 'Hourly Rate (£)',
-                              prefixIcon: Icon(Icons.payments_outlined),
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          ),
-                          const SizedBox(height: 16),
-                          DropdownButtonFormField<String>(
-                            value: status,
-                            decoration: const InputDecoration(
-                              labelText: 'Status',
-                              prefixIcon: Icon(Icons.flag_outlined),
-                            ),
-                            items: const [
-                              DropdownMenuItem(value: 'active', child: Text('Active')),
-                              DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
-                              DropdownMenuItem(value: 'passed', child: Text('Passed')),
-                            ],
-                            onChanged: (value) {
-                              if (value != null) {
-                                setDialogState(() => status = value);
-                              }
-                            },
                           ),
                         ],
                       ),
@@ -1380,9 +1728,9 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                   ),
                   Container(
                     padding: const EdgeInsets.all(20),
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       border: Border(
-                        top: BorderSide(color: AppTheme.neutral200),
+                        top: BorderSide(color: colorScheme.outlineVariant),
                       ),
                     ),
                     child: Row(
@@ -1492,42 +1840,45 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
     String method = 'cash';
     String paidTo = 'instructor';
     bool saving = false;
+    bool paymentDetailsExpanded = false;
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Container(
               height: MediaQuery.of(context).size.height * 0.75,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: Column(
                 children: [
                   Container(
                     padding: const EdgeInsets.all(20),
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       border: Border(
-                        bottom: BorderSide(color: AppTheme.neutral200),
+                        bottom: BorderSide(color: colorScheme.outlineVariant),
                       ),
                     ),
                     child: Row(
                       children: [
-                        const Text(
+                        Text(
                           'Add Payment',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
+                            color: colorScheme.onSurface,
                           ),
                         ),
                         const Spacer(),
                         IconButton(
                           onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.close),
+                          icon: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -1544,19 +1895,19 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'Amount (£)',
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: AppTheme.neutral700,
+                                        color: colorScheme.onSurfaceVariant,
                                       ),
                                     ),
                                     const SizedBox(height: 8),
                                     TextField(
                                       controller: amountController,
-                                      decoration: const InputDecoration(
-                                        prefixIcon: Icon(Icons.currency_pound),
+                                      decoration: InputDecoration(
+                                        prefixIcon: Icon(Icons.currency_pound, color: colorScheme.onSurfaceVariant),
                                         hintText: '0.00',
                                       ),
                                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -1569,19 +1920,19 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'Hours',
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: AppTheme.neutral700,
+                                        color: colorScheme.onSurfaceVariant,
                                       ),
                                     ),
                                     const SizedBox(height: 8),
                                     TextField(
                                       controller: hoursController,
-                                      decoration: const InputDecoration(
-                                        prefixIcon: Icon(Icons.schedule_outlined),
+                                      decoration: InputDecoration(
+                                        prefixIcon: Icon(Icons.schedule_outlined, color: colorScheme.onSurfaceVariant),
                                         hintText: '0',
                                       ),
                                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -1592,78 +1943,93 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                             ],
                           ),
                           const SizedBox(height: 20),
-                          const Text(
-                            'Payment Method',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.neutral700,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          StreamBuilder<UserProfile?>(
-                            stream: widget.instructorId != null
-                                ? _firestoreService.streamUserProfile(widget.instructorId!)
-                                : null,
-                            builder: (context, instructorSnapshot) {
-                              final instructor = instructorSnapshot.data;
-                              final allMethods = _getAllPaymentMethods(instructor: instructor);
-                              final theme = Theme.of(context);
-                              return Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  ...allMethods.map((m) => _buildMethodChip(
-                                    m['id'] as String,
-                                    m['label'] as String,
-                                    m['icon'] as IconData,
-                                    method,
-                                    (val) => setDialogState(() => method = val),
-                                  )),
-                                  if (instructor != null)
-                                    _buildAddNewPaymentMethodChip(
-                                      context,
-                                      theme.colorScheme,
-                                      instructor,
-                                      setDialogState,
-                                      (newId) => setDialogState(() => method = newId),
+                          _buildEditProfileExpandableSection(
+                            context,
+                            title: 'Payment details (optional)',
+                            subtitle: 'Method and paid-to - tap to expand',
+                            expanded: paymentDetailsExpanded,
+                            onExpandedChanged: (v) => setDialogState(() => paymentDetailsExpanded = v),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Payment Method',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                StreamBuilder<UserProfile?>(
+                                  stream: widget.instructorId != null
+                                      ? _firestoreService.streamUserProfile(widget.instructorId!)
+                                      : null,
+                                  builder: (context, instructorSnapshot) {
+                                    final instructor = instructorSnapshot.data;
+                                    final allMethods = _getAllPaymentMethods(instructor: instructor);
+                                    final theme = Theme.of(context);
+                                    return Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: [
+                                        ...allMethods.map((m) => _buildMethodChip(
+                                          context,
+                                          m['id'] as String,
+                                          m['label'] as String,
+                                          m['icon'] as IconData,
+                                          method,
+                                          (val) => setDialogState(() => method = val),
+                                        )),
+                                        if (instructor != null)
+                                          _buildAddNewPaymentMethodChip(
+                                            context,
+                                            theme.colorScheme,
+                                            instructor,
+                                            setDialogState,
+                                            (newId) => setDialogState(() => method = newId),
+                                          ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                                const SizedBox(height: 20),
+                                Text(
+                                  'Paid To',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildPaidToOption(
+                                        context,
+                                        'instructor',
+                                        'Instructor',
+                                        Icons.person_outline,
+                                        paidTo,
+                                        (val) => setDialogState(() => paidTo = val),
+                                      ),
                                     ),
-                                ],
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 20),
-                          const Text(
-                            'Paid To',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.neutral700,
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _buildPaidToOption(
+                                        context,
+                                        'school',
+                                        'School',
+                                        Icons.business_outlined,
+                                        paidTo,
+                                        (val) => setDialogState(() => paidTo = val),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildPaidToOption(
-                                  'instructor',
-                                  'Instructor',
-                                  Icons.person_outline,
-                                  paidTo,
-                                  (val) => setDialogState(() => paidTo = val),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _buildPaidToOption(
-                                  'school',
-                                  'School',
-                                  Icons.business_outlined,
-                                  paidTo,
-                                  (val) => setDialogState(() => paidTo = val),
-                                ),
-                              ),
-                            ],
                           ),
                         ],
                       ),
@@ -1671,9 +2037,9 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                   ),
                   Container(
                     padding: const EdgeInsets.all(20),
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       border: Border(
-                        top: BorderSide(color: AppTheme.neutral200),
+                        top: BorderSide(color: colorScheme.outlineVariant),
                       ),
                     ),
                     child: Row(
@@ -1774,12 +2140,14 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
   }
 
   Widget _buildMethodChip(
+    BuildContext context,
     String value,
     String label,
     IconData icon,
     String current,
     Function(String) onSelect,
   ) {
+    final colorScheme = Theme.of(context).colorScheme;
     final isSelected = current == value;
     return GestureDetector(
       onTap: () => onSelect(value),
@@ -1787,24 +2155,24 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? _getMethodBackgroundColor(value) : AppTheme.neutral50,
+          color: isSelected ? _getMethodBackgroundColor(value) : colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? _getMethodColor(value) : AppTheme.neutral200,
+            color: isSelected ? _getMethodColor(value) : colorScheme.outlineVariant,
             width: isSelected ? 2 : 1,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 18, color: isSelected ? _getMethodColor(value) : AppTheme.neutral500),
+            Icon(icon, size: 18, color: isSelected ? _getMethodColor(value) : colorScheme.onSurfaceVariant),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                color: isSelected ? _getMethodColor(value) : AppTheme.neutral600,
+                color: isSelected ? _getMethodColor(value) : colorScheme.onSurface,
               ),
             ),
           ],
@@ -1898,12 +2266,14 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
   }
 
   Widget _buildPaidToOption(
+    BuildContext context,
     String value,
     String label,
     IconData icon,
     String current,
     Function(String) onSelect,
   ) {
+    final colorScheme = Theme.of(context).colorScheme;
     final isSelected = current == value;
     return GestureDetector(
       onTap: () => onSelect(value),
@@ -1911,23 +2281,23 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primaryLight.withOpacity(0.1) : AppTheme.neutral50,
+          color: isSelected ? colorScheme.primaryContainer.withOpacity(0.5) : colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected ? AppTheme.primary : AppTheme.neutral200,
+            color: isSelected ? colorScheme.primary : colorScheme.outlineVariant,
             width: isSelected ? 2 : 1,
           ),
         ),
         child: Column(
           children: [
-            Icon(icon, color: isSelected ? AppTheme.primary : AppTheme.neutral500),
+            Icon(icon, color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant),
             const SizedBox(height: 8),
             Text(
               label,
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                color: isSelected ? AppTheme.primary : AppTheme.neutral600,
+                color: isSelected ? colorScheme.primary : colorScheme.onSurface,
               ),
             ),
           ],
