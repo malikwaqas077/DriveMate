@@ -14,6 +14,13 @@ import 'auth_service.dart';
 /// This is called when app is in background or terminated
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Notifications via `dart:io` / local notifications are not supported on web.
+  // Guard early to avoid `Platform._operatingSystem` errors on Flutter web.
+  if (kIsWeb) {
+    debugPrint('[Notification] Skipping background handler on web');
+    return;
+  }
+
   debugPrint('[Notification] Background message: ${message.messageId}');
   
   // Initialize notification plugin for background isolate
@@ -144,6 +151,14 @@ class NotificationService {
   /// Initialize notification service
   Future<void> initialize() async {
     if (_initialized) return;
+
+    // Local notifications and `Platform.isAndroid` are not supported on web.
+    // Skip initialization entirely on web to prevent runtime errors.
+    if (kIsWeb) {
+      debugPrint('[Notification] Skipping notification initialization on web');
+      _initialized = true;
+      return;
+    }
 
     // Android initialization settings
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');

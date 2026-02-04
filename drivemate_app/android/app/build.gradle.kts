@@ -64,6 +64,10 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Suppress debug symbol stripping warning when debugSymbolLevel is NONE
+            ndk {
+                debugSymbolLevel = "NONE"
+            }
         }
     }
 }
