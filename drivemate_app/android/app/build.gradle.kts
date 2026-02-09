@@ -33,10 +33,6 @@ android {
     }
 
     defaultConfig {
-        ndk {
-            // NONE = no debug symbols; AAB is built successfully, Flutter verification fails but file is valid
-            debugSymbolLevel = "NONE"
-        }
         applicationId = "app.techsol.drivemate"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -64,10 +60,9 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
-            // Suppress debug symbol stripping warning when debugSymbolLevel is NONE
-            ndk {
-                debugSymbolLevel = "NONE"
-            }
+            // Flutter will handle debug symbol stripping automatically
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

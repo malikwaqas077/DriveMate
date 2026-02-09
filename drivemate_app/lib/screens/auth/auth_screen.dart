@@ -6,6 +6,7 @@ import '../../models/user_profile.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_logo.dart';
 import '../../widgets/loading_view.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -152,6 +153,73 @@ class _AuthScreenState extends State<AuthScreen>
     // New social user: leave profile null so AuthGate shows SocialProfileCompletionScreen
   }
 
+  Future<void> _handleForgotPassword() async {
+    final emailController = TextEditingController(text: _signInEmail.text);
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset Password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter your email address and we\'ll send you a link to reset your password.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                hintText: 'Enter your email',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Send Reset Link'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != true) return;
+
+    final email = emailController.text.trim();
+    if (email.isEmpty) {
+      _showError('Please enter your email address');
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await _authService.sendPasswordResetEmail(email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Password reset link sent to $email'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Failed to send reset email');
+    } catch (e) {
+      _showError('Failed to send reset email');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _handleSignUp() async {
     if (_signUpName.text.trim().isEmpty) {
       _showError('Please enter your full name');
@@ -290,18 +358,9 @@ class _AuthScreenState extends State<AuthScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Logo
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(
-              Icons.directions_car_rounded,
-              color: Colors.white,
-              size: 32,
-            ),
+          const AppLogo(
+            size: 56,
+            borderRadius: 16,
           ),
           const SizedBox(height: 20),
           const Text(
@@ -488,7 +547,7 @@ class _AuthScreenState extends State<AuthScreen>
           // Footer
           Center(
             child: TextButton(
-              onPressed: () {},
+              onPressed: _busy ? null : _handleForgotPassword,
               child: Text(
                 'Forgot your password?',
                 style: TextStyle(
@@ -531,12 +590,18 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   Widget _buildSocialSignInButtons() {
+    const googleLogo = Image(
+      image: AssetImage('assets/google_logo.png'),
+      width: 20,
+      height: 20,
+    );
+    
     return _isAppleSignInAvailable
         ? Row(
             children: [
               Expanded(
                 child: _buildOutlinedSocialButton(
-                  icon: Icons.g_mobiledata_rounded,
+                  iconWidget: googleLogo,
                   label: 'Google',
                   onPressed: _busy ? null : _handleSignInWithGoogle,
                 ),
@@ -552,14 +617,15 @@ class _AuthScreenState extends State<AuthScreen>
             ],
           )
         : _buildOutlinedSocialButton(
-            icon: Icons.g_mobiledata_rounded,
+            iconWidget: googleLogo,
             label: 'Continue with Google',
             onPressed: _busy ? null : _handleSignInWithGoogle,
           );
   }
 
   Widget _buildOutlinedSocialButton({
-    required IconData icon,
+    IconData? icon,
+    Widget? iconWidget,
     required String label,
     VoidCallback? onPressed,
   }) {
@@ -577,7 +643,10 @@ class _AuthScreenState extends State<AuthScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 22, color: colorScheme.onSurface),
+          if (iconWidget != null)
+            iconWidget
+          else if (icon != null)
+            Icon(icon, size: 22, color: colorScheme.onSurface),
           const SizedBox(width: 10),
           Text(
             label,

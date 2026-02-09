@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../models/student.dart';
@@ -6,6 +8,7 @@ import '../../services/auth_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_logo.dart';
 import '../chat/conversations_list_screen.dart';
 import 'student_lessons_screen.dart';
 import 'student_profile_screen.dart';
@@ -20,12 +23,13 @@ class StudentHome extends StatefulWidget {
   State<StudentHome> createState() => _StudentHomeState();
 }
 
-class _StudentHomeState extends State<StudentHome> {
+class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
   final ChatService _chatService = ChatService();
   int _currentIndex = 0;
   Student? _student;
+  StreamSubscription<Student?>? _studentSubscription;
 
   late List<Widget> _screens;
   late final List<_NavItem> _navItems;
@@ -33,6 +37,7 @@ class _StudentHomeState extends State<StudentHome> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _navItems = const [
       _NavItem(
         icon: Icons.calendar_today_outlined,
@@ -49,10 +54,28 @@ class _StudentHomeState extends State<StudentHome> {
     _buildScreens();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _studentSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Pause/resume stream subscription based on app lifecycle
+    if (state == AppLifecycleState.paused) {
+      _studentSubscription?.pause();
+    } else if (state == AppLifecycleState.resumed) {
+      _studentSubscription?.resume();
+    }
+  }
+
   void _loadStudent() {
     final studentId = widget.profile.studentId;
     if (studentId == null) return;
-    _firestoreService.streamStudentById(studentId).listen((student) {
+    _studentSubscription = _firestoreService.streamStudentById(studentId).listen((student) {
       if (mounted && student != null) {
         setState(() {
           _student = student;
@@ -98,18 +121,9 @@ class _StudentHomeState extends State<StudentHome> {
       elevation: 0,
       title: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              gradient: context.primaryGradient,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.directions_car_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
+          const AppLogo(
+            size: 36,
+            borderRadius: 10,
           ),
           const SizedBox(width: 12),
           Column(

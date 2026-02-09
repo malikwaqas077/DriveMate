@@ -9,6 +9,7 @@ import '../../services/chat_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/role_preference_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_logo.dart';
 import '../chat/conversations_list_screen.dart';
 import '../owner/owner_access_requests_screen.dart';
 import '../owner/owner_instructor_choice_screen.dart';
@@ -156,18 +157,9 @@ class _InstructorHomeState extends State<InstructorHome> with WidgetsBindingObse
       elevation: 0,
       title: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              gradient: context.primaryGradient,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.directions_car_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
+          const AppLogo(
+            size: 36,
+            borderRadius: 10,
           ),
           const SizedBox(width: 12),
           Column(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'app_logo.dart';
 
 class LoadingView extends StatefulWidget {
   const LoadingView({
@@ -106,10 +107,7 @@ class _LoadingViewState extends State<LoadingView>
 
   Widget _buildLogo(BuildContext context) {
     return Container(
-      width: 100,
-      height: 100,
       decoration: BoxDecoration(
-        gradient: context.primaryGradient,
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
@@ -119,12 +117,9 @@ class _LoadingViewState extends State<LoadingView>
           ),
         ],
       ),
-      child: const Center(
-        child: Icon(
-          Icons.directions_car_rounded,
-          size: 48,
-          color: Colors.white,
-        ),
+      child: const AppLogo(
+        size: 100,
+        borderRadius: 28,
       ),
     );
   }

@@ -69,6 +69,11 @@ class AuthService {
     );
   }
 
+  /// Send password reset email
+  Future<void> sendPasswordResetEmail(String email) {
+    return _auth.sendPasswordResetEmail(email: email.trim());
+  }
+
   Future<UserCredential> createStudentLogin({
     String? email,
     String? phone,

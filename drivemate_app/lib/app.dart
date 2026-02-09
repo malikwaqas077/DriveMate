@@ -225,11 +225,19 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
     // Wait a bit for the app to be fully loaded, then navigate
     Future.delayed(const Duration(milliseconds: 500), () {
-      _navigateFromNotification(type, data);
+      // Check if still mounted and user is logged in before navigating
+      if (!mounted || _authService.currentUser == null) return;
+      _navigateFromNotification(type, data, retryCount: 0);
     });
   }
 
-  void _handleNotificationAction(Map<String, String> actionData) {
+  void _handleNotificationAction(Map<String, String> actionData, {int retryCount = 0}) {
+    // Limit retries to prevent infinite loops
+    if (retryCount >= 3) {
+      debugPrint('[Notification] Max retries reached for notification action');
+      return;
+    }
+
     final action = actionData['action'];
     final conversationId = actionData['conversationId'];
 
@@ -237,6 +245,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
     // Wait a bit for the app to be fully loaded, then navigate
     Future.delayed(const Duration(milliseconds: 500), () async {
+      // Check if still mounted before proceeding
+      if (!mounted) return;
+      
       final user = _authService.currentUser;
       if (user == null) return;
 
@@ -246,7 +257,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       final navigator = navigatorKey.currentState;
       if (navigator == null) {
         Future.delayed(const Duration(seconds: 1), () {
-          _handleNotificationAction(actionData);
+          if (!mounted) return;
+          _handleNotificationAction(actionData, retryCount: retryCount + 1);
         });
         return;
       }
@@ -315,8 +327,15 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
   void _navigateFromNotification(
     String type,
-    Map<String, dynamic> data,
-  ) {
+    Map<String, dynamic> data, {
+    int retryCount = 0,
+  }) {
+    // Limit retries to prevent infinite loops
+    if (retryCount >= 3) {
+      debugPrint('[Notification] Max retries reached for navigation');
+      return;
+    }
+
     debugPrint('[Notification] Navigating for type: $type');
     
     // Get current user profile to determine role
@@ -327,6 +346,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
 
     _firestoreService.getUserProfile(user.uid).then((profile) {
+      // Check if still mounted before proceeding
+      if (!mounted) return;
+      
       if (profile == null) {
         debugPrint('[Notification] No profile found for user');
         return;
@@ -337,9 +359,10 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       final navigator = navigatorKey.currentState;
       if (navigator == null) {
         debugPrint('[Notification] Navigator not ready, retrying...');
-        // Retry after a delay
+        // Retry after a delay with incremented retry count
         Future.delayed(const Duration(seconds: 1), () {
-          _navigateFromNotification(type, data);
+          if (!mounted) return;
+          _navigateFromNotification(type, data, retryCount: retryCount + 1);
         });
         return;
       }

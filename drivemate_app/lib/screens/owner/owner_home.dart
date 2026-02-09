@@ -5,6 +5,7 @@ import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/role_preference_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_logo.dart';
 import 'owner_dashboard_screen.dart';
 import 'owner_instructor_choice_screen.dart';
 import 'owner_instructors_screen.dart';
@@ -60,18 +61,9 @@ class OwnerHome extends StatelessWidget {
       elevation: 0,
       title: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              gradient: context.primaryGradient,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.directions_car_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
+          const AppLogo(
+            size: 36,
+            borderRadius: 10,
           ),
           const SizedBox(width: 12),
           Column(
