@@ -6,6 +6,8 @@ import '../../services/firestore_service.dart';
 import '../../services/role_preference_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_logo.dart';
+import 'announcements_screen.dart';
+import 'expenses_screen.dart';
 import 'owner_dashboard_screen.dart';
 import 'owner_instructor_choice_screen.dart';
 import 'owner_instructors_screen.dart';
@@ -34,13 +36,14 @@ class OwnerHome extends StatelessWidget {
       builder: (context, snapshot) {
         final isAlsoInstructor = snapshot.data ?? false;
         return DefaultTabController(
-          length: 3,
+          length: 4,
           child: Scaffold(
             appBar: _buildAppBar(context, isAlsoInstructor, authService),
             body: TabBarView(
               children: [
                 OwnerDashboardScreen(owner: profile),
                 OwnerInstructorsScreen(owner: profile),
+                ExpensesScreen(owner: profile),
                 OwnerReportsScreen(owner: profile),
               ],
             ),
@@ -94,6 +97,7 @@ class OwnerHome extends StatelessWidget {
         tabs: const [
           Tab(icon: Icon(Icons.dashboard_outlined), text: 'Dashboard'),
           Tab(icon: Icon(Icons.people_outline), text: 'Instructors'),
+          Tab(icon: Icon(Icons.receipt_long_outlined), text: 'Expenses'),
           Tab(icon: Icon(Icons.bar_chart_outlined), text: 'Reports'),
         ],
       ),
@@ -139,6 +143,13 @@ class OwnerHome extends StatelessWidget {
               value: 'logout',
               isDestructive: true,
             ),
+            const PopupMenuDivider(),
+            _buildPopupItem(
+              context,
+              icon: Icons.campaign_outlined,
+              label: 'Announcements',
+              value: 'announcements',
+            ),
             if (isAlsoInstructor) ...[
               const PopupMenuDivider(),
               _buildPopupItem(
@@ -154,6 +165,16 @@ class OwnerHome extends StatelessWidget {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => OwnerSettingsScreen(owner: profile),
+                ),
+              );
+            }
+            if (value == 'announcements') {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AnnouncementsScreen(
+                    profile: profile,
+                    isOwner: true,
+                  ),
                 ),
               );
             }

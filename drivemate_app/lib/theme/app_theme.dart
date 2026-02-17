@@ -1068,3 +1068,27 @@ extension ThemeExtensions on BuildContext {
       theme.extension<DriveMateThemeExtension>()?.primaryGradient ??
       AppTheme.primaryGradient;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEMANTIC COLORS (theme-aware)
+// Bug 1.10: Provides dark-mode-safe semantic colors
+// ─────────────────────────────────────────────────────────────────────────────
+
+extension SemanticColors on BuildContext {
+  // Status colors that adapt to dark mode
+  Color get successColor => isDark ? const Color(0xFF34D399) : AppTheme.success;
+  Color get successBgColor => isDark ? const Color(0xFF064E3B) : AppTheme.successLight;
+  Color get warningColor => isDark ? const Color(0xFFFBBF24) : AppTheme.warning;
+  Color get warningBgColor => isDark ? const Color(0xFF78350F) : AppTheme.warningLight;
+  Color get errorColor => isDark ? const Color(0xFFF87171) : AppTheme.error;
+  Color get errorBgColor => isDark ? const Color(0xFF7F1D1D) : AppTheme.errorLight;
+  Color get infoColor => isDark ? const Color(0xFF60A5FA) : AppTheme.info;
+  Color get infoBgColor => isDark ? const Color(0xFF1E3A5F) : AppTheme.infoLight;
+
+  // Neutral replacements
+  Color get neutralBg => isDark ? const Color(0xFF1E1E2E) : AppTheme.neutral50;
+  Color get neutralCard => isDark ? const Color(0xFF27272A) : AppTheme.neutral100;
+  Color get neutralBorder => isDark ? const Color(0xFF3F3F46) : AppTheme.neutral200;
+  Color get neutralSubtle => isDark ? const Color(0xFFA1A1AA) : AppTheme.neutral500;
+  Color get neutralText => isDark ? const Color(0xFFE4E4E7) : AppTheme.neutral800;
+}

@@ -8,6 +8,7 @@ enum EmptyViewType {
   payments,
   calendar,
   reports,
+  expenses,
   generic,
 }
 
@@ -83,6 +84,8 @@ class _EmptyViewState extends State<EmptyView>
         return Icons.calendar_today_outlined;
       case EmptyViewType.reports:
         return Icons.analytics_outlined;
+      case EmptyViewType.expenses:
+        return Icons.receipt_long_outlined;
       case EmptyViewType.generic:
         return Icons.inbox_outlined;
     }
@@ -101,6 +104,8 @@ class _EmptyViewState extends State<EmptyView>
         return const Color(0xFF4F46E5).withOpacity(0.15);
       case EmptyViewType.reports:
         return const Color(0xFFEC4899).withOpacity(0.15);
+      case EmptyViewType.expenses:
+        return AppTheme.warningLight;
       case EmptyViewType.generic:
         return colorScheme.surfaceContainerHighest;
     }
@@ -119,6 +124,8 @@ class _EmptyViewState extends State<EmptyView>
         return const Color(0xFF4F46E5);
       case EmptyViewType.reports:
         return const Color(0xFFEC4899);
+      case EmptyViewType.expenses:
+        return AppTheme.warning;
       case EmptyViewType.generic:
         return colorScheme.onSurfaceVariant;
     }

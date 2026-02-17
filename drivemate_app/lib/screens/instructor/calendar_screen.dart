@@ -2,15 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/lesson.dart';
 import '../../models/payment.dart';
 import '../../models/student.dart';
 import '../../models/user_profile.dart';
+import '../../services/chat_service.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/empty_view.dart';
 import '../../widgets/loading_view.dart';
+import '../chat/chat_screen.dart';
 import 'student_detail_screen.dart';
 
 class CalendarScreen extends StatefulWidget {
@@ -24,10 +27,10 @@ class CalendarScreen extends StatefulWidget {
 
 class _CalendarScreenState extends State<CalendarScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final ChatService _chatService = ChatService();
 
   static const int _defaultStartHour = 6; // Default start hour (06:00)
   static const int _endHour = 24;
-  static const int _defaultScrollHour = 6; // Default scroll to 06:00
   static const double _hourHeight = 70;
   static const double _timeColumnWidth = 40;
   static const double _compactBreakpoint = 380;
@@ -39,6 +42,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
   late final ScrollController _headerScrollController;
   late final ScrollController _gridScrollController;
   bool _syncingScroll = false;
+
+  // Drag-and-drop state
+  String? _draggingLessonId;
+  int? _dragTargetDayIndex;
+  double? _dragTargetMinutes;
 
   // Cached streams - created once in initState
   late final Stream<UserProfile?> _instructorStream;
@@ -417,78 +425,157 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     child: SizedBox(
                       width: gridWidth,
                       height: totalHeight,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          _buildGridBackground(
-                            context,
-                            weekDays,
-                            totalHours,
-                            selectedDay,
-                          ),
-                          _NowIndicator(
-                            weekDays: weekDays,
-                            dayWidth: dayWidth,
-                            startHour: startHour,
-                            endHour: _endHour,
-                            hourHeight: _hourHeight,
-                          ),
-                          Positioned.fill(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.translucent,
-                              onTapDown: (details) {
-                                if (students.isEmpty) {
-                                  _showSnack(
-                                    context,
-                                    'Add a student first before adding a lesson.',
-                                  );
-                                  return;
-                                }
-                                final position = details.localPosition;
-                                if (position.dx < 0 || position.dy < 0) return;
-                                final dayIndex =
-                                    (position.dx / dayWidth).floor().clamp(
-                                          0,
-                                          weekDays.length - 1,
+                      child: DragTarget<Lesson>(
+                        onMove: (details) {
+                          final renderBox = context.findRenderObject() as RenderBox?;
+                          if (renderBox == null) return;
+                          final local = renderBox.globalToLocal(details.offset);
+                          // Account for time column width and scroll offset
+                          final adjustedX = local.dx - _timeColumnWidth + (_gridScrollController.hasClients ? _gridScrollController.offset : 0);
+                          final adjustedY = local.dy + (_verticalController.hasClients ? _verticalController.offset : 0);
+                          final di = (adjustedX / dayWidth).floor().clamp(0, weekDays.length - 1);
+                          final minutesFromStart = (adjustedY / _hourHeight * 60).round();
+                          final snapped = ((minutesFromStart / 15).round() * 15).clamp(0, (_endHour - startHour) * 60 - 15);
+                          final totalMins = (startHour * 60) + snapped;
+                          if (di != _dragTargetDayIndex || totalMins.toDouble() != _dragTargetMinutes) {
+                            setState(() {
+                              _dragTargetDayIndex = di;
+                              _dragTargetMinutes = totalMins.toDouble();
+                            });
+                          }
+                        },
+                        onLeave: (_) {
+                          setState(() {
+                            _dragTargetDayIndex = null;
+                            _dragTargetMinutes = null;
+                          });
+                        },
+                        onAcceptWithDetails: (details) async {
+                          final lesson = details.data;
+                          if (_dragTargetDayIndex == null || _dragTargetMinutes == null) return;
+                          final targetDay = weekDays[_dragTargetDayIndex!];
+                          final targetHour = _dragTargetMinutes!.toInt() ~/ 60;
+                          final targetMinute = _dragTargetMinutes!.toInt() % 60;
+                          final newStart = DateTime(
+                            targetDay.year,
+                            targetDay.month,
+                            targetDay.day,
+                            targetHour,
+                            targetMinute,
+                          );
+                          // Skip if same position
+                          if (newStart == lesson.startAt) return;
+                          try {
+                            final updated = lesson.copyWith(startAt: newStart);
+                            await _firestoreService.updateLesson(
+                              lesson: updated,
+                              previousDuration: lesson.durationHours,
+                            );
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Failed to reschedule: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        builder: (context, candidateData, rejectedData) {
+                          return Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              _buildGridBackground(
+                                context,
+                                weekDays,
+                                totalHours,
+                                selectedDay,
+                              ),
+                              _NowIndicator(
+                                weekDays: weekDays,
+                                dayWidth: dayWidth,
+                                startHour: startHour,
+                                endHour: _endHour,
+                                hourHeight: _hourHeight,
+                              ),
+                              // Drop target highlight
+                              if (_draggingLessonId != null && _dragTargetDayIndex != null && _dragTargetMinutes != null)
+                                Positioned(
+                                  top: ((_dragTargetMinutes! - startHour * 60) / 60) * _hourHeight,
+                                  left: _dragTargetDayIndex! * dayWidth + 1,
+                                  width: dayWidth - 2,
+                                  height: _hourHeight,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primary.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: AppTheme.primary.withOpacity(0.4),
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (_draggingLessonId == null)
+                                Positioned.fill(
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.translucent,
+                                    onTapDown: (details) {
+                                      if (students.isEmpty) {
+                                        _showSnack(
+                                          context,
+                                          'Add a student first before adding a lesson.',
                                         );
-                                final minutesFromStart =
-                                    (position.dy / _hourHeight * 60).round();
-                                final snappedMinutes =
-                                    (minutesFromStart / 15).round() * 15;
-                                final totalMinutes = (startHour * 60) +
-                                    snappedMinutes.clamp(
-                                      0,
-                                      (_endHour - startHour) * 60 - 1,
-                                    );
-                                final tapDate = weekDays[dayIndex as int];
-                                final initialStart = DateTime(
-                                  tapDate.year,
-                                  tapDate.month,
-                                  tapDate.day,
-                                  totalMinutes ~/ 60,
-                                  totalMinutes % 60,
-                                );
-                                _showAddLesson(
-                                  context,
-                                  students,
-                                  selectedDay,
-                                  initialStart: initialStart,
-                                );
-                              },
-                            ),
-                          ),
-                          ..._buildLessonBlocks(
-                            context,
-                            lessons,
-                            weekDays,
-                            dayWidth,
-                            students,
-                            studentMap,
-                            lessonStatuses,
-                            startHour,
-                            instructor: currentInstructor,
-                          ),
-                        ],
+                                        return;
+                                      }
+                                      final position = details.localPosition;
+                                      if (position.dx < 0 || position.dy < 0) return;
+                                      final dayIndex =
+                                          (position.dx / dayWidth).floor().clamp(
+                                                0,
+                                                weekDays.length - 1,
+                                              );
+                                      final minutesFromStart =
+                                          (position.dy / _hourHeight * 60).round();
+                                      final snappedMinutes =
+                                          (minutesFromStart / 15).round() * 15;
+                                      final totalMinutes = (startHour * 60) +
+                                          snappedMinutes.clamp(
+                                            0,
+                                            (_endHour - startHour) * 60 - 1,
+                                          );
+                                      final tapDate = weekDays[dayIndex as int];
+                                      final initialStart = DateTime(
+                                        tapDate.year,
+                                        tapDate.month,
+                                        tapDate.day,
+                                        totalMinutes ~/ 60,
+                                        totalMinutes % 60,
+                                      );
+                                      _showAddLesson(
+                                        context,
+                                        students,
+                                        selectedDay,
+                                        initialStart: initialStart,
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ..._buildLessonBlocks(
+                                context,
+                                lessons,
+                                weekDays,
+                                dayWidth,
+                                students,
+                                studentMap,
+                                lessonStatuses,
+                                startHour,
+                                instructor: currentInstructor,
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
                   ),
@@ -542,11 +629,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
             lesson,
             students,
             studentMap,
-          ),
-          onLongPress: () => _showLessonEditDeleteActions(
-            context,
-            lesson,
-            students,
           ),
           child: ListTile(
             contentPadding: EdgeInsets.zero,
@@ -661,6 +743,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
         .where((lesson) =>
             weekDays.any((day) => _isSameDay(day, lesson.startAt)))
         .toList();
+
+    // Find the globally next upcoming lesson across ALL lessons (not just this week)
+    final now = DateTime.now();
+    String? nextUpcomingId;
+    DateTime? nextUpcomingStart;
+    for (final lesson in lessons) {
+      if (lesson.status == 'scheduled' && lesson.startAt.isAfter(now)) {
+        if (nextUpcomingStart == null || lesson.startAt.isBefore(nextUpcomingStart)) {
+          nextUpcomingId = lesson.id;
+          nextUpcomingStart = lesson.startAt;
+        }
+      }
+    }
     
     return filteredLessons.map((lesson) {
       final dayIndex = weekDays.indexWhere(
@@ -712,101 +807,182 @@ class _CalendarScreenState extends State<CalendarScreen> {
           : paymentState == _LessonPaymentState.paid
               ? const Color(0xFF4CAF50)
               : Colors.grey;
-      return Positioned(
-        top: clampedTop,
-        left: dayIndex * dayWidth + 1,
-        width: dayWidth - 2,
-        height: height,
-        child: GestureDetector(
-          onTap: () => _showLessonActions(
-            context,
-            lesson,
-            students,
-            studentMap,
-          ),
-          onLongPress: () => _showLessonEditDeleteActions(
-            context,
-            lesson,
-            students,
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Container(
-                    color: backgroundColor,
+      // Bug 1.5: Highlight next upcoming lesson
+      final isNextUpcoming = lesson.id == nextUpcomingId;
+      final canDrag = lesson.status == 'scheduled' && !isPast;
+      final tileContent = Container(
+        decoration: isNextUpcoming
+            ? BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: Colors.white,
+                  width: 2.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.amber.shade600.withOpacity(0.6),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ],
+              )
+            : null,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(isNextUpcoming ? 4 : 6),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Container(
+                  color: backgroundColor,
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  color: statusBarColor,
+                  child: Text(
+                    statusLabel,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    color: statusBarColor,
-                    child: Text(
-                      statusLabel,
-                      textAlign: TextAlign.center,
+              ),
+              Positioned(
+                left: 4,
+                right: 4,
+                top: 3,
+                bottom: 18,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      DateFormat('HH:mm').format(lesson.startAt),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      DateFormat('HH:mm').format(endAt),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 9,
-                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Expanded(
+                      child: Text(
+                        studentMap[lesson.studentId] ?? 'Student',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Bug 1.5: "NEXT" badge on upcoming lesson
+              if (isNextUpcoming)
+                Positioned(
+                  bottom: 20,
+                  right: 2,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'NEXT',
+                      style: TextStyle(
+                        color: Colors.amber.shade800,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
                 ),
-                Positioned(
-                  left: 4,
-                  right: 4,
-                  top: 3,
-                  bottom: 18,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        DateFormat('HH:mm').format(lesson.startAt),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        DateFormat('HH:mm').format(endAt),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Expanded(
-                        child: Text(
-                          studentMap[lesson.studentId] ?? 'Student',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            ],
           ),
         ),
+      );
+
+      final tileWidget = canDrag
+          ? LongPressDraggable<Lesson>(
+              data: lesson,
+              delay: const Duration(milliseconds: 400),
+              feedback: Material(
+                elevation: 6,
+                borderRadius: BorderRadius.circular(6),
+                child: Opacity(
+                  opacity: 0.85,
+                  child: SizedBox(
+                    width: dayWidth - 2,
+                    height: height,
+                    child: tileContent,
+                  ),
+                ),
+              ),
+              childWhenDragging: Opacity(
+                opacity: 0.3,
+                child: tileContent,
+              ),
+              onDragStarted: () {
+                setState(() => _draggingLessonId = lesson.id);
+              },
+              onDragEnd: (_) {
+                setState(() {
+                  _draggingLessonId = null;
+                  _dragTargetDayIndex = null;
+                  _dragTargetMinutes = null;
+                });
+              },
+              child: GestureDetector(
+                onTap: () => _showLessonActions(
+                  context,
+                  lesson,
+                  students,
+                  studentMap,
+                ),
+                child: tileContent,
+              ),
+            )
+          : GestureDetector(
+              onTap: () => _showLessonActions(
+                context,
+                lesson,
+                students,
+                studentMap,
+              ),
+              child: tileContent,
+            );
+
+      return Positioned(
+        top: clampedTop,
+        left: dayIndex * dayWidth + 1,
+        width: dayWidth - 2,
+        height: height,
+        child: tileWidget,
       );
     }).toList();
   }
@@ -1131,6 +1307,81 @@ class _CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
+  Future<void> _openChatWithStudent(
+    BuildContext context,
+    String studentId,
+    String studentName,
+  ) async {
+    try {
+      final conversationId = await _chatService.getOrCreateConversation(
+        instructorId: widget.instructor.id,
+        studentId: studentId,
+      );
+      final conversation = await _chatService.getConversation(conversationId);
+      if (conversation != null && context.mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ChatScreen(
+              conversation: conversation,
+              profile: widget.instructor,
+              otherUserName: studentName,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open chat: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _offerShareLessonWithStudent(
+    Lesson lesson,
+    String studentName,
+  ) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Lesson created for $studentName'),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        action: SnackBarAction(
+          label: 'SHARE',
+          onPressed: () => _shareLessonDetails(lesson),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _shareLessonDetails(Lesson lesson) async {
+    final message = _formatLessonDetails(lesson);
+    await Share.share(message);
+  }
+
+  String _formatLessonDetails(Lesson lesson) {
+    final date = DateFormat('EEE, d MMM yyyy').format(lesson.startAt);
+    final time = DateFormat('HH:mm').format(lesson.startAt);
+    final endAt = lesson.startAt.add(
+      Duration(minutes: (lesson.durationHours * 60).round()),
+    );
+    final endTime = DateFormat('HH:mm').format(endAt);
+    final durationStr = lesson.durationHours == 1.0
+        ? '1 hour'
+        : '${lesson.durationHours} hours';
+    final type = lesson.lessonType.replaceAll('_', ' ');
+    return 'Lesson booked!\n'
+        'Date: $date\n'
+        'Time: $time - $endTime ($durationStr)\n'
+        'Type: $type';
+  }
+
   Future<void> _showLessonActions(
     BuildContext context,
     Lesson lesson,
@@ -1152,135 +1403,456 @@ class _CalendarScreenState extends State<CalendarScreen> {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (context) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    Expanded(
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.pop(context);
-                          _openStudentProfile(
-                            parentContext,
-                            lesson.studentId,
-                            studentName,
-                          );
-                        },
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.person, size: 32),
-                            const SizedBox(height: 4),
-                            const Text('Profile', style: TextStyle(fontSize: 12)),
-                          ],
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.7,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.pop(context);
+                              _openStudentProfile(
+                                parentContext,
+                                lesson.studentId,
+                                studentName,
+                              );
+                            },
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.person, size: 32),
+                                const SizedBox(height: 4),
+                                const Text('Profile', style: TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.pop(context);
+                              _openChatWithStudent(parentContext, lesson.studentId, studentName);
+                            },
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.chat_bubble_outline, size: 32, color: AppTheme.primary),
+                                const SizedBox(height: 4),
+                                const Text('Chat', style: TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (student.phone != null && student.phone!.isNotEmpty) ...[
+                          Expanded(
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.pop(context);
+                                _makePhoneCall(student.phone!);
+                              },
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.phone, size: 32, color: AppTheme.primary),
+                                  const SizedBox(height: 4),
+                                  const Text('Call', style: TextStyle(fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.pop(context);
+                                _sendSMS(student.phone!);
+                              },
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.message, size: 32, color: AppTheme.primary),
+                                  const SizedBox(height: 4),
+                                  const Text('Message', style: TextStyle(fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    if (student.phone != null && student.phone!.isNotEmpty) ...[
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            Navigator.pop(context);
-                            _makePhoneCall(student.phone!);
-                          },
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.phone, size: 32, color: AppTheme.primary),
-                              const SizedBox(height: 4),
-                              const Text('Call', style: TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            Navigator.pop(context);
-                            _sendSMS(student.phone!);
-                          },
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.message, size: 32, color: AppTheme.primary),
-                              const SizedBox(height: 4),
-                              const Text('Message', style: TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (student.phone != null && student.phone!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Text(
-                    student.phone!,
-                    style: Theme.of(context).textTheme.bodySmall,
-                    textAlign: TextAlign.center,
                   ),
-                ),
-              if (student.address != null && student.address!.isNotEmpty) ...[
-                const Divider(),
-                ListTile(
-                  leading: const Icon(Icons.directions_car, color: AppTheme.primary),
-                  title: const Text('Drive to student'),
-                  subtitle: Text(student.address!),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _openNavigation(student.address!, lesson, student);
-                  },
-                ),
-              ],
-              const Divider(),
-              _buildNotificationButtons(context, lesson, student),
-            ],
+                  if (student.address != null && student.address!.isNotEmpty) ...[
+                    const Divider(),
+                    ListTile(
+                      leading: const Icon(Icons.directions_car, color: AppTheme.primary),
+                      title: const Text('Drive to student'),
+                      subtitle: Text(student.address!),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _openNavigation(student.address!, lesson, student);
+                      },
+                    ),
+                  ],
+                  const Divider(),
+                  _buildNotificationButtons(context, lesson, student),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.share, color: AppTheme.primary),
+                    title: const Text('Share Lesson Details'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _shareLessonDetails(lesson);
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.edit),
+                    title: const Text('Edit lesson'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showEditLesson(parentContext, lesson, students);
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.payment_rounded, color: AppTheme.success),
+                    title: const Text('Record Payment'),
+                    subtitle: Text('For $studentName'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showQuickPaymentDialog(
+                        parentContext,
+                        preselectedStudentId: lesson.studentId,
+                        preselectedStudentName: studentName,
+                      );
+                    },
+                  ),
+                  if (lesson.status == 'scheduled')
+                    ListTile(
+                      leading: Icon(Icons.cancel_outlined, color: Colors.orange.shade700),
+                      title: Text('Cancel Lesson', style: TextStyle(color: Colors.orange.shade700)),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showCancelLessonDialog(parentContext, lesson, studentName);
+                      },
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.delete, color: Colors.red),
+                    title: const Text('Delete lesson', style: TextStyle(color: Colors.red)),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await _confirmDeleteLesson(parentContext, lesson);
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
     );
   }
 
-  Future<void> _showLessonEditDeleteActions(
+  // Feature 2.1: Cancel Lesson Dialog
+  Future<void> _showCancelLessonDialog(
     BuildContext context,
     Lesson lesson,
-    List<Student> students,
+    String studentName,
   ) async {
-    final parentContext = context;
+    final reasonController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel Lesson'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cancel lesson with $studentName?'),
+            const SizedBox(height: 8),
+            Text(
+              'Date: ${DateFormat('EEE, MMM d').format(lesson.startAt)} at ${DateFormat('HH:mm').format(lesson.startAt)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: reasonController,
+              decoration: const InputDecoration(
+                labelText: 'Reason (optional)',
+                hintText: 'e.g. Weather, illness...',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep Lesson'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.orange.shade700,
+            ),
+            child: const Text('Cancel Lesson'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        // Update lesson status to cancelled
+        await _firestoreService.updateLessonStatus(
+          lessonId: lesson.id,
+          status: 'cancelled',
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Lesson cancelled'),
+              backgroundColor: Colors.orange.shade700,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error cancelling lesson: $e'),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  // Bug 1.7 / Feature 2.3: Quick Payment Dialog
+  Future<void> _showQuickPaymentDialog(
+    BuildContext context, {
+    String? preselectedStudentId,
+    String? preselectedStudentName,
+  }) async {
+    String? selectedStudentId = preselectedStudentId;
+    String? selectedStudentName = preselectedStudentName;
+    final amountController = TextEditingController();
+    final hoursController = TextEditingController();
+    String paymentMethod = 'cash';
+
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.edit),
-                title: const Text('Edit lesson'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showEditLesson(parentContext, lesson, students);
-                },
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 24,
+                right: 24,
+                top: 24,
               ),
-              ListTile(
-                leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Delete lesson', style: TextStyle(color: Colors.red)),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _confirmDeleteLesson(parentContext, lesson);
-                },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.payment_rounded, color: AppTheme.success),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Quick Payment',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Student picker (if not preselected)
+                  if (selectedStudentId == null)
+                    Autocomplete<Student>(
+                      displayStringForOption: (student) => student.name,
+                      optionsBuilder: (textEditingValue) {
+                        if (textEditingValue.text.isEmpty) {
+                          return _cachedStudents;
+                        }
+                        return _cachedStudents.where((s) => s.name
+                            .toLowerCase()
+                            .contains(textEditingValue.text.toLowerCase()));
+                      },
+                      onSelected: (student) {
+                        setSheetState(() {
+                          selectedStudentId = student.id;
+                          selectedStudentName = student.name;
+                        });
+                      },
+                      fieldViewBuilder: (ctx, controller, focusNode, onSubmitted) {
+                        return TextField(
+                          controller: controller,
+                          focusNode: focusNode,
+                          decoration: const InputDecoration(
+                            labelText: 'Student',
+                            prefixIcon: Icon(Icons.person_rounded),
+                            border: OutlineInputBorder(),
+                          ),
+                        );
+                      },
+                    )
+                  else
+                    InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Student',
+                        prefixIcon: Icon(Icons.person_rounded),
+                        border: OutlineInputBorder(),
+                      ),
+                      child: Text(selectedStudentName ?? 'Unknown'),
+                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: amountController,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Amount (£)',
+                            prefixIcon: Icon(Icons.attach_money_rounded),
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: hoursController,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Hours',
+                            prefixIcon: Icon(Icons.timer_rounded),
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: paymentMethod,
+                    decoration: const InputDecoration(
+                      labelText: 'Payment Method',
+                      prefixIcon: Icon(Icons.wallet_rounded),
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                      DropdownMenuItem(value: 'bank_transfer', child: Text('Bank Transfer')),
+                      DropdownMenuItem(value: 'card', child: Text('Card')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setSheetState(() => paymentMethod = value);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        if (selectedStudentId == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Please select a student')),
+                          );
+                          return;
+                        }
+                        final amount = double.tryParse(amountController.text.trim());
+                        final hours = double.tryParse(hoursController.text.trim());
+                        if (amount == null || amount <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Please enter a valid amount')),
+                          );
+                          return;
+                        }
+                        if (hours == null || hours <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Please enter valid hours')),
+                          );
+                          return;
+                        }
+                        try {
+                          final payment = Payment(
+                            id: '',
+                            studentId: selectedStudentId!,
+                            instructorId: widget.instructor.id,
+                            amount: amount,
+                            currency: 'GBP',
+                            hoursPurchased: hours,
+                            method: paymentMethod,
+                            createdAt: DateTime.now(),
+                            paidTo: 'instructor',
+                          );
+                          await _firestoreService.addPayment(
+                            payment: payment,
+                            studentId: selectedStudentId!,
+                          );
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Payment of £${amount.toStringAsFixed(0)} recorded for ${selectedStudentName ?? 'student'}'),
+                                backgroundColor: AppTheme.success,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Error recording payment: $e'),
+                                backgroundColor: AppTheme.error,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Record Payment'),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -1499,33 +2071,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
     int startHour,
   ) {
     if (_didAutoScroll || !_verticalController.hasClients) return;
-    final weekLessons = lessons
-        .where((lesson) => weekDays.any((day) => _isSameDay(day, lesson.startAt)))
-        .toList();
-    
-    // Always scroll to default scroll hour (06:00) relative to the start hour
-    final defaultHour =
-        _defaultScrollHour.clamp(startHour, _endHour - 1).toInt();
-    final defaultMinutesFromStart = (defaultHour - startHour) * 60;
-    var targetMinutesFromStart = defaultMinutesFromStart;
-    
-    // If there are lessons and the earliest one is before the default scroll hour,
-    // scroll to show the earliest lesson instead
-    if (weekLessons.isNotEmpty) {
-      weekLessons.sort((a, b) => a.startAt.compareTo(b.startAt));
-      final first = weekLessons.first.startAt;
-      final firstMinutesFromStart =
-          (first.hour * 60 + first.minute) - (startHour * 60);
-      if (firstMinutesFromStart >= 0 && firstMinutesFromStart < defaultMinutesFromStart) {
-        targetMinutesFromStart = firstMinutesFromStart;
-      }
-    }
-    
+
+    // Scroll to current time and center it on screen
+    final now = DateTime.now();
+    final currentMinutesFromStart = (now.hour * 60 + now.minute) - (startHour * 60);
+    final targetMinutesFromStart = currentMinutesFromStart.clamp(0, (_endHour - startHour) * 60);
+
     final top = (targetMinutesFromStart / 60) * _hourHeight;
     _didAutoScroll = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_verticalController.hasClients) return;
-      final offset = (top - _hourHeight)
+      // Center the current time on screen
+      final viewportHeight = _verticalController.position.viewportDimension;
+      final offset = (top - viewportHeight / 2)
           .clamp(0.0, _verticalController.position.maxScrollExtent)
           .toDouble();
       _verticalController.jumpTo(offset);
@@ -1752,6 +2310,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                   _didAutoScroll = false;
                                 });
                               }
+                            }
+                            // Offer to share lesson with student
+                            if (mounted) {
+                              _offerShareLessonWithStudent(
+                                lesson,
+                                selectedStudent!.name,
+                              );
                             }
                           } catch (e) {
                             debugPrint('[calendar] Error adding lesson: $e');

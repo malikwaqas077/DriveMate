@@ -117,7 +117,7 @@ class InstructorSettings {
 
   final List<CancellationRule>? cancellationRules;
   final int? reminderHoursBefore;
-  final Map<String, bool>? notificationSettings; // e.g., {'autoSendOnWay': true, 'autoSendArrived': false}
+  final Map<String, dynamic>? notificationSettings; // e.g., {'autoSendOnWay': true, 'autoSendArrived': false, 'lowBalanceThresholdHours': 2.0}
   final String? defaultNavigationApp; // 'google_maps', 'apple_maps', or null for system default
   final Map<String, int>? lessonColors; // e.g., {'lesson': 0xFFFF9800, 'test': 0xFF2196F3, 'mock_test': 0xFF7B1FA2}
   final String? defaultCalendarView; // 'grid' or 'list'
@@ -150,7 +150,7 @@ class InstructorSettings {
           : null,
       reminderHoursBefore: data['reminderHoursBefore'] as int?,
       notificationSettings: data['notificationSettings'] != null
-          ? Map<String, bool>.from(data['notificationSettings'] as Map)
+          ? Map<String, dynamic>.from(data['notificationSettings'] as Map)
           : null,
       defaultNavigationApp: data['defaultNavigationApp'] as String?,
       lessonColors: data['lessonColors'] != null
@@ -173,7 +173,7 @@ class InstructorSettings {
   InstructorSettings copyWith({
     List<CancellationRule>? cancellationRules,
     int? reminderHoursBefore,
-    Map<String, bool>? notificationSettings,
+    Map<String, dynamic>? notificationSettings,
     String? defaultNavigationApp,
     Map<String, int>? lessonColors,
     String? defaultCalendarView,

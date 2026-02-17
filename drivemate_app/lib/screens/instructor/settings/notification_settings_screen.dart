@@ -21,6 +21,9 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
   late int _reminderHoursBefore;
   late bool _autoSendOnWay;
   late bool _autoSendArrived;
+  // Feature 2.5: Low balance alerts
+  late bool _lowBalanceAlertEnabled;
+  late double _lowBalanceThresholdHours;
 
   static const List<int> reminderHoursOptions = [1, 2, 6, 12, 24];
 
@@ -36,6 +39,9 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
     _autoSendOnWay = settings?.notificationSettings?['autoSendOnWay'] ?? false;
     _autoSendArrived = settings?.notificationSettings?['autoSendArrived'] ?? false;
+    // Feature 2.5: Low balance alert settings
+    _lowBalanceAlertEnabled = settings?.notificationSettings?['lowBalanceAlertEnabled'] == true;
+    _lowBalanceThresholdHours = (settings?.notificationSettings?['lowBalanceThresholdHours'] as num?)?.toDouble() ?? 2.0;
   }
 
   Future<void> _saveSettings() async {
@@ -49,6 +55,8 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         notificationSettings: {
           'autoSendOnWay': _autoSendOnWay,
           'autoSendArrived': _autoSendArrived,
+          'lowBalanceAlertEnabled': _lowBalanceAlertEnabled,
+          'lowBalanceThresholdHours': _lowBalanceThresholdHours,
         },
         defaultNavigationApp: currentSettings?.defaultNavigationApp,
         lessonColors: currentSettings?.lessonColors,
@@ -171,6 +179,39 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                         value: _autoSendArrived,
                         onChanged: (value) => setState(() => _autoSendArrived = value),
                       ),
+                      const Divider(height: 32),
+                      // Feature 2.5: Low balance alerts
+                      SwitchListTile(
+                        title: const Text('Low Balance Alerts'),
+                        subtitle: const Text('Get notified when a student\'s balance is low'),
+                        value: _lowBalanceAlertEnabled,
+                        onChanged: (value) => setState(() => _lowBalanceAlertEnabled = value),
+                      ),
+                      if (_lowBalanceAlertEnabled) ...[
+                        const SizedBox(height: 8),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Alert when balance drops below ${_lowBalanceThresholdHours.toStringAsFixed(1)} hours',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              Slider(
+                                value: _lowBalanceThresholdHours,
+                                min: 0.5,
+                                max: 10.0,
+                                divisions: 19,
+                                label: '${_lowBalanceThresholdHours.toStringAsFixed(1)} hrs',
+                                onChanged: (value) {
+                                  setState(() => _lowBalanceThresholdHours = value);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 16),

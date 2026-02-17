@@ -25,7 +25,15 @@ class StudentsScreen extends StatefulWidget {
 class _StudentsScreenState extends State<StudentsScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final AuthService _authService = AuthService();
+  final TextEditingController _searchController = TextEditingController();
   String _statusFilter = 'active';
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   static const List<String> _statusOptions = [
     'active',
@@ -123,20 +131,67 @@ class _StudentsScreenState extends State<StudentsScreen> {
                       'passed': allStudents.where((s) => s.status == 'passed').length,
                     };
 
+                    // Feature 2.2: Filter students by search query
+                    final filteredStudents = _searchQuery.isEmpty
+                        ? students
+                        : students.where((s) {
+                            final query = _searchQuery.toLowerCase();
+                            return s.name.toLowerCase().contains(query) ||
+                                (s.phone ?? '').toLowerCase().contains(query) ||
+                                (s.email ?? '').toLowerCase().contains(query);
+                          }).toList();
+
                     return Scaffold(
                       body: Column(
                         children: [
+                          // Feature 2.2: Search bar
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                            child: TextField(
+                              controller: _searchController,
+                              decoration: InputDecoration(
+                                hintText: 'Search students...',
+                                prefixIcon: const Icon(Icons.search_rounded),
+                                suffixIcon: _searchQuery.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear_rounded),
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          setState(() => _searchQuery = '');
+                                        },
+                                      )
+                                    : null,
+                                filled: true,
+                                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setState(() => _searchQuery = value.trim());
+                              },
+                            ),
+                          ),
                           _buildStatusFilters(statusCounts),
                           Expanded(
-                            child: students.isEmpty
+                            child: filteredStudents.isEmpty
                                 ? EmptyView(
-                                    message: 'No students yet',
-                                    subtitle: 'Add your first student to get started',
+                                    message: _searchQuery.isNotEmpty
+                                        ? 'No students match "$_searchQuery"'
+                                        : 'No students yet',
+                                    subtitle: _searchQuery.isNotEmpty
+                                        ? 'Try a different search'
+                                        : 'Add your first student to get started',
                                     type: EmptyViewType.students,
-                                    actionLabel: 'Add Student',
-                                    onAction: () => _showAddStudent(context),
+                                    actionLabel: _searchQuery.isEmpty ? 'Add Student' : null,
+                                    onAction: _searchQuery.isEmpty ? () => _showAddStudent(context) : null,
                                   )
-                                : _buildStudentsList(students, creditMap),
+                                : _buildStudentsList(filteredStudents, creditMap),
                           ),
                         ],
                       ),

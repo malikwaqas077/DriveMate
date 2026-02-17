@@ -1,11 +1,11 @@
 {
-    "name": "drivemate_app",
-    "short_name": "drivemate_app",
+    "name": "DriveMate",
+    "short_name": "DriveMate",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Driving school management app for instructors, students, and owners.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

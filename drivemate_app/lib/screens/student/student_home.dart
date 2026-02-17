@@ -10,6 +10,7 @@ import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_logo.dart';
 import '../chat/conversations_list_screen.dart';
+import '../owner/announcements_screen.dart';
 import 'student_lessons_screen.dart';
 import 'student_profile_screen.dart';
 import 'student_settings_screen.dart';
@@ -241,6 +242,11 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver {
               value: 'settings',
             ),
             _buildPopupItem(
+              icon: Icons.campaign_outlined,
+              label: 'Announcements',
+              value: 'announcements',
+            ),
+            _buildPopupItem(
               icon: Icons.logout_rounded,
               label: 'Log out',
               value: 'logout',
@@ -252,6 +258,15 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => const StudentSettingsScreen(),
+                ),
+              );
+            }
+            if (value == 'announcements') {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AnnouncementsScreen(
+                    profile: widget.profile,
+                  ),
                 ),
               );
             }

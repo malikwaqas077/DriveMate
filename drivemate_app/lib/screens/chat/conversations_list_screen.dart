@@ -24,6 +24,8 @@ class ConversationsListScreen extends StatefulWidget {
 class _ConversationsListScreenState extends State<ConversationsListScreen> {
   final ChatService _chatService = ChatService();
   final FirestoreService _firestoreService = FirestoreService();
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   Future<void> _startConversationWithInstructor() async {
     if (widget.profile.studentId == null) {
@@ -102,9 +104,16 @@ class _ConversationsListScreenState extends State<ConversationsListScreen> {
   }
 
   @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isInstructor = widget.profile.role == 'instructor';
     final isStudent = widget.profile.role == 'student';
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -112,118 +121,157 @@ class _ConversationsListScreenState extends State<ConversationsListScreen> {
         elevation: 0,
         title: const Text('Messages'),
       ),
-      body: StreamBuilder<List<Conversation>>(
-        stream: isInstructor
-            ? _chatService.streamInstructorConversations(widget.profile.id)
-            : isStudent && widget.profile.studentId != null
-                ? _chatService.streamStudentConversations(widget.profile.studentId!)
-                : Stream.value(<Conversation>[]),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
-          }
-
-          if (snapshot.hasError) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.error_outline_rounded,
-                    size: 48,
-                    color: AppTheme.error,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error loading conversations',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    snapshot.error.toString(),
-                    style: Theme.of(context).textTheme.bodySmall,
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            );
-          }
-
-          final conversations = snapshot.data ?? [];
-
-          if (conversations.isEmpty) {
-            final colorScheme = Theme.of(context).colorScheme;
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.chat_bubble_outline_rounded,
-                        size: 40,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'No conversations yet',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Start a conversation with your ${isInstructor ? 'students' : 'instructor'}',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 32),
-                    FilledButton.icon(
-                      onPressed: isInstructor
-                          ? _showStudentPicker
-                          : _startConversationWithInstructor,
-                      icon: const Icon(Icons.add_rounded),
-                      label: Text(
-                        isInstructor ? 'Select Student' : 'Start Conversation',
-                      ),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 16,
-                        ),
-                      ),
-                    ),
-                  ],
+      body: Column(
+        children: [
+          // Bug 1.6: Search bar for conversations
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search conversations...',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: colorScheme.surfaceContainerHighest,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
                 ),
               ),
-            );
-          }
+              onChanged: (value) {
+                setState(() => _searchQuery = value.trim().toLowerCase());
+              },
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<Conversation>>(
+              stream: isInstructor
+                  ? _chatService.streamInstructorConversations(widget.profile.id)
+                  : isStudent && widget.profile.studentId != null
+                      ? _chatService.streamStudentConversations(widget.profile.studentId!)
+                      : Stream.value(<Conversation>[]),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
 
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: conversations.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              final conversation = conversations[index];
-              return _ConversationTile(
-                conversation: conversation,
-                profile: widget.profile,
-                chatService: _chatService,
-                firestoreService: _firestoreService,
-              );
-            },
-          );
-        },
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          size: 48,
+                          color: AppTheme.error,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Error loading conversations',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          snapshot.error.toString(),
+                          style: Theme.of(context).textTheme.bodySmall,
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                final conversations = snapshot.data ?? [];
+
+                if (conversations.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              color: colorScheme.surfaceContainerHighest,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.chat_bubble_outline_rounded,
+                              size: 40,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'No conversations yet',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Start a conversation with your ${isInstructor ? 'students' : 'instructor'}',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 32),
+                          FilledButton.icon(
+                            onPressed: isInstructor
+                                ? _showStudentPicker
+                                : _startConversationWithInstructor,
+                            icon: const Icon(Icons.add_rounded),
+                            label: Text(
+                              isInstructor ? 'Select Student' : 'Start Conversation',
+                            ),
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 16,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: conversations.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final conversation = conversations[index];
+                    return _ConversationTile(
+                      conversation: conversation,
+                      profile: widget.profile,
+                      chatService: _chatService,
+                      firestoreService: _firestoreService,
+                      searchQuery: _searchQuery,
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: isInstructor
           ? FloatingActionButton.extended(
@@ -471,12 +519,14 @@ class _ConversationTile extends StatefulWidget {
     required this.profile,
     required this.chatService,
     required this.firestoreService,
+    this.searchQuery = '',
   });
 
   final Conversation conversation;
   final UserProfile profile;
   final ChatService chatService;
   final FirestoreService firestoreService;
+  final String searchQuery;
 
   @override
   State<_ConversationTile> createState() => _ConversationTileState();
@@ -518,6 +568,17 @@ class _ConversationTileState extends State<_ConversationTile> {
 
   @override
   Widget build(BuildContext context) {
+    // Bug 1.6: Filter by search query
+    if (widget.searchQuery.isNotEmpty) {
+      final nameMatch = _otherUserName.toLowerCase().contains(widget.searchQuery);
+      final messageMatch = (widget.conversation.lastMessage ?? '')
+          .toLowerCase()
+          .contains(widget.searchQuery);
+      if (!nameMatch && !messageMatch) {
+        return const SizedBox.shrink();
+      }
+    }
+
     final colorScheme = Theme.of(context).colorScheme;
     final isInstructor = widget.profile.role == 'instructor';
     final unreadCount = isInstructor

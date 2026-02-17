@@ -2,9 +2,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/access_request.dart';
+import '../models/achievement.dart';
+import '../models/announcement.dart';
 import '../models/cancellation_request.dart';
+import '../models/competency.dart';
+import '../models/expense.dart';
 import '../models/lesson.dart';
 import '../models/payment.dart';
+import '../models/recurring_template.dart';
 import '../models/school.dart';
 import '../models/school_instructor.dart';
 import '../models/student.dart';
@@ -34,6 +39,16 @@ class FirestoreService {
       _db.collection('cancellation_requests');
   CollectionReference<Map<String, dynamic>> get _instructorNotifications =>
       _db.collection('instructor_notifications');
+  CollectionReference<Map<String, dynamic>> get _recurringTemplates =>
+      _db.collection('recurring_templates');
+  CollectionReference<Map<String, dynamic>> get _competencies =>
+      _db.collection('student_competencies');
+  CollectionReference<Map<String, dynamic>> get _achievements =>
+      _db.collection('student_achievements');
+  CollectionReference<Map<String, dynamic>> get _announcements =>
+      _db.collection('school_announcements');
+  CollectionReference<Map<String, dynamic>> get _expenses =>
+      _db.collection('expenses');
 
   Stream<UserProfile?> streamUserProfile(String uid) {
     return _users.doc(uid).snapshots().map((doc) {
@@ -695,5 +710,252 @@ class FirestoreService {
       debugPrint('[Notification] Error creating notification document: $e');
       rethrow;
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RECURRING TEMPLATES (Feature 2.4)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Future<String> saveRecurringTemplate(RecurringTemplate template) async {
+    final docRef = await _recurringTemplates.add(template.toMap());
+    return docRef.id;
+  }
+
+  Stream<List<RecurringTemplate>> streamRecurringTemplates(String instructorId) {
+    return _recurringTemplates
+        .where('instructorId', isEqualTo: instructorId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map(RecurringTemplate.fromDoc).toList());
+  }
+
+  Future<void> deleteRecurringTemplate(String id) {
+    return _recurringTemplates.doc(id).delete();
+  }
+
+  /// Batch-create lessons from a recurring template
+  Future<int> generateLessonsFromTemplate({
+    required RecurringTemplate template,
+    required DateTime startFromDate,
+  }) async {
+    final batch = _db.batch();
+    int count = 0;
+
+    // Find the first occurrence of the desired dayOfWeek on or after startFromDate
+    var current = startFromDate;
+    while (current.weekday != template.dayOfWeek) {
+      current = current.add(const Duration(days: 1));
+    }
+
+    for (int week = 0; week < template.weeks; week++) {
+      final lessonDate = current.add(Duration(days: week * 7));
+      final startAt = DateTime(
+        lessonDate.year,
+        lessonDate.month,
+        lessonDate.day,
+        template.startHour,
+        template.startMinute,
+      );
+
+      final lessonRef = _lessons.doc();
+      batch.set(lessonRef, {
+        'instructorId': template.instructorId,
+        'studentId': template.studentId,
+        'startAt': Timestamp.fromDate(startAt),
+        'durationHours': template.durationHours,
+        'lessonType': template.lessonType,
+        'status': 'scheduled',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      count++;
+    }
+
+    await batch.commit();
+    return count;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // COMPETENCIES / PROGRESS TRACKING (Feature 2.6)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Stream<List<Competency>> streamCompetencies({
+    required String studentId,
+    required String instructorId,
+  }) {
+    return _competencies
+        .where('studentId', isEqualTo: studentId)
+        .where('instructorId', isEqualTo: instructorId)
+        .snapshots()
+        .map((snap) => snap.docs.map(Competency.fromDoc).toList());
+  }
+
+  Future<void> upsertCompetency(Competency competency) async {
+    // Check if a competency already exists for this skill
+    final existing = await _competencies
+        .where('studentId', isEqualTo: competency.studentId)
+        .where('instructorId', isEqualTo: competency.instructorId)
+        .where('skill', isEqualTo: competency.skill)
+        .limit(1)
+        .get();
+
+    if (existing.docs.isNotEmpty) {
+      await _competencies.doc(existing.docs.first.id).update(competency.toMap());
+    } else {
+      await _competencies.add(competency.toMap());
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ACHIEVEMENTS (Feature 2.7)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Stream<List<Achievement>> streamAchievements(String studentId) {
+    return _achievements
+        .where('studentId', isEqualTo: studentId)
+        .orderBy('awardedAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map(Achievement.fromDoc).toList());
+  }
+
+  Future<void> awardAchievement(Achievement achievement) async {
+    // Check if already awarded
+    final existing = await _achievements
+        .where('studentId', isEqualTo: achievement.studentId)
+        .where('type', isEqualTo: achievement.type)
+        .limit(1)
+        .get();
+
+    if (existing.docs.isEmpty) {
+      await _achievements.add(achievement.toMap());
+    }
+  }
+
+  /// Check and award achievements based on cumulative hours
+  Future<void> checkAndAwardAchievements({
+    required String studentId,
+    required double totalHours,
+    required int totalLessons,
+  }) async {
+    if (totalLessons >= 1) {
+      await awardAchievement(Achievement(
+        id: '',
+        studentId: studentId,
+        type: 'first_lesson',
+        title: 'First Steps',
+        description: 'Completed your first driving lesson',
+      ));
+    }
+    if (totalHours >= 5) {
+      await awardAchievement(Achievement(
+        id: '',
+        studentId: studentId,
+        type: '5_hours',
+        title: '5 Hour Club',
+        description: 'Completed 5 hours of driving lessons',
+      ));
+    }
+    if (totalHours >= 10) {
+      await awardAchievement(Achievement(
+        id: '',
+        studentId: studentId,
+        type: '10_hours',
+        title: 'Road Regular',
+        description: 'Completed 10 hours of driving lessons',
+      ));
+    }
+    if (totalHours >= 20) {
+      await awardAchievement(Achievement(
+        id: '',
+        studentId: studentId,
+        type: '20_hours',
+        title: 'Road Warrior',
+        description: 'Completed 20 hours of driving lessons',
+      ));
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ANNOUNCEMENTS (Feature 2.9)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Stream<List<Announcement>> streamAnnouncementsForSchool(String schoolId) {
+    return _announcements
+        .where('schoolId', isEqualTo: schoolId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map(Announcement.fromDoc).toList());
+  }
+
+  Stream<List<Announcement>> streamAnnouncementsForAudience({
+    required String schoolId,
+    required String role,
+  }) {
+    // Return announcements matching 'all' or the specific role
+    return _announcements
+        .where('schoolId', isEqualTo: schoolId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map(Announcement.fromDoc)
+            .where((a) => a.audience == 'all' || a.audience == '${role}s')
+            .toList());
+  }
+
+  Future<String> createAnnouncement(Announcement announcement) async {
+    final docRef = await _announcements.add(announcement.toMap());
+    return docRef.id;
+  }
+
+  Future<void> deleteAnnouncement(String id) {
+    return _announcements.doc(id).delete();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // EXPENSES
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Stream<List<Expense>> streamExpensesForSchool(String schoolId) {
+    return _expenses
+        .where('schoolId', isEqualTo: schoolId)
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map(Expense.fromDoc).toList());
+  }
+
+  Stream<List<Expense>> streamExpensesForInstructor(String instructorId) {
+    return _expenses
+        .where('instructorId', isEqualTo: instructorId)
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map(Expense.fromDoc).toList());
+  }
+
+  Future<String> addExpense(Expense expense) async {
+    final doc = await _expenses.add(expense.toMap());
+    return doc.id;
+  }
+
+  Future<void> updateExpense(String id, Map<String, dynamic> data) {
+    return _expenses.doc(id).update(data);
+  }
+
+  Future<void> deleteExpense(String id) {
+    return _expenses.doc(id).delete();
+  }
+
+  Future<int> batchAddExpenses(List<Expense> expenses) async {
+    int count = 0;
+    // Firestore batch limit is 500 operations
+    for (var i = 0; i < expenses.length; i += 500) {
+      final batch = _db.batch();
+      final chunk = expenses.skip(i).take(500);
+      for (final expense in chunk) {
+        final ref = _expenses.doc();
+        batch.set(ref, expense.toMap());
+        count++;
+      }
+      await batch.commit();
+    }
+    return count;
   }
 }

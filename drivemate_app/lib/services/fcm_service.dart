@@ -32,8 +32,29 @@ class FCMService {
     // Listen for foreground messages - show heads-up notification
     FirebaseMessaging.onMessage.listen((message) {
       _handleForegroundMessage(message);
-      // Show local notification with actions for chat messages
-      if (message.data['type'] == 'chat_message') {
+      final msgType = message.data['type'];
+      debugPrint('[FCM-FG] message type="$msgType" hasNotifPayload=${message.notification != null}');
+
+      if (msgType == 'chat_message') {
+        final conversationId = message.data['conversationId'] ?? '';
+        final activeConv = NotificationService.instance.activeConversationId;
+        debugPrint('[FCM-FG] convId=$conversationId activeConv=$activeConv');
+
+        if (activeConv == conversationId) {
+          debugPrint('[FCM-FG] → Suppressed (user viewing this conversation)');
+          return;
+        }
+        if (message.notification == null) {
+          debugPrint('[FCM-FG] → Data-only message, calling showNotificationFromMessage');
+          NotificationService.instance.showNotificationFromMessage(message);
+        } else {
+          debugPrint('[FCM-FG] → Has notification payload, OS will show it. Skipping local show.');
+        }
+      } else if (msgType != null && message.notification != null) {
+        // Non-chat notification in foreground (reflection_added, lesson_created, etc.):
+        // OS does NOT auto-display notification payloads when app is in foreground.
+        // Show via local notification so the user sees it.
+        debugPrint('[FCM-FG] → Non-chat type "$msgType" in foreground, showing locally');
         NotificationService.instance.showNotificationFromMessage(message);
       }
     });

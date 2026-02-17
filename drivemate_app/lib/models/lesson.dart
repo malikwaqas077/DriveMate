@@ -25,6 +25,32 @@ class Lesson {
   final String? notes;
   final String? studentReflection;
 
+  Lesson copyWith({
+    String? id,
+    String? instructorId,
+    String? studentId,
+    String? schoolId,
+    DateTime? startAt,
+    double? durationHours,
+    String? lessonType,
+    String? status,
+    String? notes,
+    String? studentReflection,
+  }) {
+    return Lesson(
+      id: id ?? this.id,
+      instructorId: instructorId ?? this.instructorId,
+      studentId: studentId ?? this.studentId,
+      schoolId: schoolId ?? this.schoolId,
+      startAt: startAt ?? this.startAt,
+      durationHours: durationHours ?? this.durationHours,
+      lessonType: lessonType ?? this.lessonType,
+      status: status ?? this.status,
+      notes: notes ?? this.notes,
+      studentReflection: studentReflection ?? this.studentReflection,
+    );
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'instructorId': instructorId,

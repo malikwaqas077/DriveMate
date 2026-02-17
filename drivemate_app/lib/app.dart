@@ -16,6 +16,7 @@ import 'screens/chat/conversations_list_screen.dart';
 import 'services/chat_service.dart';
 import 'screens/instructor/cancellation_requests_screen.dart';
 import 'screens/instructor/instructor_home.dart';
+import 'screens/instructor/student_detail_screen.dart';
 import 'screens/owner/owner_home.dart';
 import 'screens/owner/owner_instructor_choice_screen.dart';
 import 'screens/student/student_home.dart';
@@ -239,15 +240,12 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
 
     final action = actionData['action'];
-    final conversationId = actionData['conversationId'];
-
-    if (conversationId == null) return;
 
     // Wait a bit for the app to be fully loaded, then navigate
     Future.delayed(const Duration(milliseconds: 500), () async {
       // Check if still mounted before proceeding
       if (!mounted) return;
-      
+
       final user = _authService.currentUser;
       if (user == null) return;
 
@@ -264,8 +262,17 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       }
 
       if (action == 'REPLY' || action == 'OPEN_CHAT') {
-        // Navigate to specific chat screen
-        await _navigateToChat(navigator, profile, conversationId);
+        final conversationId = actionData['conversationId'];
+        if (conversationId != null) {
+          await _navigateToChat(navigator, profile, conversationId);
+        }
+      } else if (action == 'NAVIGATE') {
+        // Non-chat notification tap: navigate based on notification type
+        final type = actionData['type'];
+        if (type != null) {
+          debugPrint('[Notification] NAVIGATE action for type: $type');
+          _navigateFromNotification(type, Map<String, dynamic>.from(actionData));
+        }
       }
     });
   }
@@ -417,14 +424,29 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
           break;
 
         case 'reflection_added':
-          // Navigate to instructor calendar screen
+          // Navigate to student detail screen to see the reflection
           if (profile.role == 'instructor') {
-            debugPrint('[Notification] Navigating to InstructorHome');
-            navigator.push(
-              MaterialPageRoute(
-                builder: (context) => InstructorHome(profile: profile),
-              ),
-            );
+            final studentId = data['studentId'] as String?;
+            final studentName = data['studentName'] as String? ?? 'Student';
+            if (studentId != null && studentId.isNotEmpty) {
+              debugPrint('[Notification] Navigating to StudentDetailScreen for reflection');
+              navigator.push(
+                MaterialPageRoute(
+                  builder: (context) => StudentDetailScreen(
+                    studentId: studentId,
+                    studentName: studentName,
+                    instructorId: profile.id,
+                  ),
+                ),
+              );
+            } else {
+              debugPrint('[Notification] No studentId in reflection data, navigating to InstructorHome');
+              navigator.push(
+                MaterialPageRoute(
+                  builder: (context) => InstructorHome(profile: profile),
+                ),
+              );
+            }
           }
           break;
 

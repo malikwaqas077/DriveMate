@@ -15,8 +15,11 @@ import '../owner/owner_access_requests_screen.dart';
 import '../owner/owner_instructor_choice_screen.dart';
 import '../owner/owner_instructors_screen.dart';
 import '../owner/owner_reports_screen.dart';
+import '../owner/announcements_screen.dart';
 import 'calendar_screen.dart';
 import 'cancellation_requests_screen.dart';
+import 'instructor_expenses_screen.dart';
+import 'recurring_lesson_screen.dart';
 import 'settings/settings_main_screen.dart';
 import 'money_screen.dart';
 import 'insights_screen.dart';
@@ -352,6 +355,25 @@ class _InstructorHomeState extends State<InstructorHome> with WidgetsBindingObse
                 value: 'school_reports',
               ),
             ],
+            const PopupMenuDivider(),
+            _buildPopupItem(
+              context,
+              icon: Icons.receipt_long_outlined,
+              label: 'Expenses',
+              value: 'expenses',
+            ),
+            _buildPopupItem(
+              context,
+              icon: Icons.repeat_rounded,
+              label: 'Recurring Lessons',
+              value: 'recurring_lessons',
+            ),
+            _buildPopupItem(
+              context,
+              icon: Icons.campaign_outlined,
+              label: 'Announcements',
+              value: 'announcements',
+            ),
             _buildPopupItem(
               context,
               icon: Icons.description_outlined,
@@ -392,6 +414,34 @@ class _InstructorHomeState extends State<InstructorHome> with WidgetsBindingObse
                 MaterialPageRoute(
                   builder: (_) => OwnerReportsScreen(
                     owner: widget.profile,
+                  ),
+                ),
+              );
+            }
+            if (value == 'expenses') {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => InstructorExpensesScreen(
+                    instructor: widget.profile,
+                  ),
+                ),
+              );
+            }
+            if (value == 'recurring_lessons') {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => RecurringLessonScreen(
+                    instructor: widget.profile,
+                  ),
+                ),
+              );
+            }
+            if (value == 'announcements') {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AnnouncementsScreen(
+                    profile: widget.profile,
+                    isOwner: _isOwner,
                   ),
                 ),
               );

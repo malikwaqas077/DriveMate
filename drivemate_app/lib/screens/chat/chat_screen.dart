@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -5,6 +7,7 @@ import '../../models/conversation.dart';
 import '../../models/message.dart';
 import '../../models/user_profile.dart';
 import '../../services/chat_service.dart';
+import '../../services/notification_service.dart';
 import '../../theme/app_theme.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -29,9 +32,79 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _isSending = false;
 
+  // Bug 1.4: Manual stream subscription instead of StreamBuilder
+  StreamSubscription<List<Message>>? _messagesSubscription;
+  List<Message> _messages = [];
+  bool _isLoadingMessages = true;
+  String? _messagesError;
+  bool _hasInitiallyScrolled = false;
+
   @override
   void initState() {
     super.initState();
+
+    // Bug 1.3: Set active conversation to suppress notifications
+    NotificationService.instance.setActiveConversation(widget.conversation.id);
+
+    // Bug 1.2: Cancel any existing notification for this conversation
+    NotificationService.instance.cancelNotification(widget.conversation.id.hashCode);
+
+    // Bug 1.4: Subscribe to messages stream manually
+    _messagesSubscription = _chatService
+        .streamMessages(widget.conversation.id)
+        .listen(
+      (messages) {
+        if (!mounted) return;
+        final hadMessages = _messages.isNotEmpty;
+        final previousCount = _messages.length;
+
+        setState(() {
+          _messages = messages;
+          _isLoadingMessages = false;
+          _messagesError = null;
+        });
+
+        // Auto-scroll: only on first load or if user is near bottom
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_scrollController.hasClients) return;
+
+          if (!_hasInitiallyScrolled) {
+            // First load: jump to bottom
+            _scrollController.jumpTo(
+              _scrollController.position.maxScrollExtent,
+            );
+            _hasInitiallyScrolled = true;
+          } else if (messages.length > previousCount) {
+            // New message arrived: only scroll if near bottom
+            final maxScroll = _scrollController.position.maxScrollExtent;
+            final currentScroll = _scrollController.offset;
+            if (maxScroll - currentScroll < 100) {
+              _scrollController.animateTo(
+                maxScroll,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            }
+          }
+        });
+
+        // Mark as read only when new messages from other sender arrive
+        if (messages.isNotEmpty && messages.length > previousCount) {
+          final lastMessage = messages.last;
+          if (lastMessage.senderId != widget.profile.id) {
+            _markAsRead();
+          }
+        }
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() {
+          _messagesError = error.toString();
+          _isLoadingMessages = false;
+        });
+      },
+    );
+
     // Mark messages as read when opening chat
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _markAsRead();
@@ -40,6 +113,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    // Bug 1.3: Clear active conversation
+    NotificationService.instance.setActiveConversation(null);
+    // Bug 1.4: Cancel stream subscription
+    _messagesSubscription?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -52,6 +129,8 @@ class _ChatScreenState extends State<ChatScreen> {
         userId: widget.profile.id,
         userRole: widget.profile.role,
       );
+      // Bug 1.2: Cancel notification after marking as read
+      NotificationService.instance.cancelNotification(widget.conversation.id.hashCode);
     } catch (e) {
       debugPrint('Error marking as read: $e');
     }
@@ -156,122 +235,9 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Messages list
+          // Messages list - Bug 1.4: No longer using StreamBuilder
           Expanded(
-            child: StreamBuilder<List<Message>>(
-              stream: _chatService.streamMessages(widget.conversation.id),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.error_outline_rounded,
-                          size: 48,
-                          color: AppTheme.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Error loading messages',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final messages = snapshot.data ?? [];
-
-                if (messages.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            color: AppTheme.neutral100,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.chat_bubble_outline_rounded,
-                            size: 40,
-                            color: AppTheme.neutral400,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        Text(
-                          'No messages yet',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Start the conversation!',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: AppTheme.neutral500,
-                              ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                // Scroll to bottom when new messages arrive and mark as read
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (_scrollController.hasClients) {
-                    _scrollController.jumpTo(
-                      _scrollController.position.maxScrollExtent,
-                    );
-                  }
-                  // Mark messages as read when they're displayed
-                  _markAsRead();
-                });
-
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message = messages[index];
-                    final isOwnMessage = message.senderId == widget.profile.id;
-                    final showDateSeparator = index == 0 ||
-                        _shouldShowDateSeparator(
-                          messages[index - 1].createdAt,
-                          message.createdAt,
-                        );
-
-                    return Column(
-                      children: [
-                        if (showDateSeparator && message.createdAt != null)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            child: Text(
-                              _formatDate(message.createdAt!),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        _MessageBubble(
-                          message: message,
-                          isOwnMessage: isOwnMessage,
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
+            child: _buildMessagesList(colorScheme),
           ),
           // Message input
           Container(
@@ -343,6 +309,105 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMessagesList(ColorScheme colorScheme) {
+    if (_isLoadingMessages) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_messagesError != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 48,
+              color: AppTheme.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Error loading messages',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_messages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.chat_bubble_outline_rounded,
+                size: 40,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'No messages yet',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Start the conversation!',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.all(16),
+      itemCount: _messages.length,
+      itemBuilder: (context, index) {
+        final message = _messages[index];
+        final isOwnMessage = message.senderId == widget.profile.id;
+        final showDateSeparator = index == 0 ||
+            _shouldShowDateSeparator(
+              _messages[index - 1].createdAt,
+              message.createdAt,
+            );
+
+        return Column(
+          // Bug 1.4: Add ValueKey to prevent widget reuse issues
+          key: ValueKey(message.id),
+          children: [
+            if (showDateSeparator && message.createdAt != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  _formatDate(message.createdAt!),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            _MessageBubble(
+              message: message,
+              isOwnMessage: isOwnMessage,
+            ),
+          ],
+        );
+      },
     );
   }
 

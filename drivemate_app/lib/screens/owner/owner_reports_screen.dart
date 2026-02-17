@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/access_request.dart';
+import '../../models/expense.dart';
 import '../../models/lesson.dart';
 import '../../models/payment.dart';
 import '../../models/school_instructor.dart';
@@ -76,12 +77,20 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
                 }
                 final payments = paymentsSnapshot.data ?? [];
 
-                return _buildContent(
-                  context,
-                  links,
-                  approvedLinks,
-                  latestRequestByInstructor,
-                  payments,
+                return StreamBuilder<List<Expense>>(
+                  stream: _firestoreService.streamExpensesForSchool(schoolId),
+                  builder: (context, expensesSnapshot) {
+                    final expenses = expensesSnapshot.data ?? [];
+
+                    return _buildContent(
+                      context,
+                      links,
+                      approvedLinks,
+                      latestRequestByInstructor,
+                      payments,
+                      expenses,
+                    );
+                  },
                 );
               },
             );
@@ -97,6 +106,7 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
     List<SchoolInstructor> approvedLinks,
     Map<String, AccessRequest> latestRequestByInstructor,
     List<Payment> payments,
+    List<Expense> expenses,
   ) {
     final colorScheme = Theme.of(context).colorScheme;
     final now = DateTime.now();
@@ -125,12 +135,16 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
     final yearTotal = yearToSchool +
         _sumPaidTo(payments, yearStart, yearEnd, 'instructor');
 
+    // Expense metrics
+    final monthExpenses = _sumExpensesInRange(expenses, monthStart, monthEnd);
+    final yearExpenses = _sumExpensesInRange(expenses, yearStart, yearEnd);
+
     // Calculate fees
     double monthFeeDue = 0;
     for (final link in approvedLinks) {
       if (link.feeFrequency == 'month') monthFeeDue += link.feeAmount;
     }
-    final monthNet = monthToSchool - monthFeeDue;
+    final monthNet = monthToSchool - monthFeeDue - monthExpenses;
 
     // Month change
     final monthChange = prevMonthTotal > 0
@@ -139,6 +153,9 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
 
     // Earnings trend
     final earningsTrend = _calculateEarningsTrend(payments, now);
+
+    // Expense category breakdown for selected month
+    final categoryBreakdown = _expenseCategoryBreakdown(expenses, monthStart, monthEnd);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -154,6 +171,8 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
           monthChange,
           yearTotal,
           earningsTrend,
+          monthExpenses: monthExpenses,
+          yearExpenses: yearExpenses,
         ),
         const SizedBox(height: 16),
 
@@ -164,7 +183,22 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
           monthToInstructor,
           monthNet,
           monthFeeDue,
+          monthExpenses: monthExpenses,
         ),
+        const SizedBox(height: 24),
+
+        // Expense Breakdown
+        if (categoryBreakdown.isNotEmpty) ...[
+          _buildSectionHeader(context, 'Expense Breakdown', Icons.receipt_long_rounded),
+          const SizedBox(height: 12),
+          _buildExpenseBreakdown(context, categoryBreakdown),
+          const SizedBox(height: 24),
+        ],
+
+        // Feature 2.8: Enhanced analytics - Retention & Completion
+        _buildSectionHeader(context, 'Key Metrics', Icons.analytics_rounded),
+        const SizedBox(height: 12),
+        _buildKeyMetricsCards(context, allLinks, payments, monthStart, monthEnd),
         const SizedBox(height: 24),
 
         // Instructor performance section
@@ -184,6 +218,188 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
           );
         }),
       ],
+    );
+  }
+
+  double _sumExpensesInRange(List<Expense> expenses, DateTime start, DateTime end) {
+    return expenses
+        .where((e) => !e.date.isBefore(start) && e.date.isBefore(end))
+        .fold(0.0, (sum, e) => sum + e.amount);
+  }
+
+  Map<String, double> _expenseCategoryBreakdown(
+    List<Expense> expenses, DateTime start, DateTime end,
+  ) {
+    final map = <String, double>{};
+    for (final e in expenses) {
+      if (!e.date.isBefore(start) && e.date.isBefore(end)) {
+        map[e.category] = (map[e.category] ?? 0) + e.amount;
+      }
+    }
+    return map;
+  }
+
+  Widget _buildExpenseBreakdown(
+    BuildContext context,
+    Map<String, double> categoryBreakdown,
+  ) {
+    final sorted = categoryBreakdown.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return Column(
+      children: [
+        for (var i = 0; i < sorted.length; i += 2)
+          Padding(
+            padding: EdgeInsets.only(bottom: i + 2 < sorted.length ? 12 : 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildMetricCard(
+                    context,
+                    icon: Expense.categoryIcon(sorted[i].key),
+                    label: Expense.categoryLabel(sorted[i].key),
+                    value: '£${sorted[i].value.toStringAsFixed(0)}',
+                    color: AppTheme.error,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: i + 1 < sorted.length
+                      ? _buildMetricCard(
+                          context,
+                          icon: Expense.categoryIcon(sorted[i + 1].key),
+                          label: Expense.categoryLabel(sorted[i + 1].key),
+                          value: '£${sorted[i + 1].value.toStringAsFixed(0)}',
+                          color: AppTheme.error,
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildKeyMetricsCards(
+    BuildContext context,
+    List<SchoolInstructor> allLinks,
+    List<Payment> payments,
+    DateTime monthStart,
+    DateTime monthEnd,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Revenue per instructor for this month
+    final revenuePerInstructor = <String, double>{};
+    for (final link in allLinks) {
+      final instructorRevenue = payments
+          .where((p) =>
+              p.instructorId == link.instructorId &&
+              p.paidTo == 'school' &&
+              !p.createdAt.isBefore(monthStart) &&
+              p.createdAt.isBefore(monthEnd))
+          .fold<double>(0, (sum, p) => sum + p.amount);
+      revenuePerInstructor[link.instructorId] = instructorRevenue;
+    }
+
+    final totalMonthPayments = payments
+        .where((p) =>
+            !p.createdAt.isBefore(monthStart) && p.createdAt.isBefore(monthEnd))
+        .length;
+    final totalPayments = payments.length;
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildMetricCard(
+                context,
+                icon: Icons.people_outline_rounded,
+                label: 'Active Instructors',
+                value: '${allLinks.length}',
+                color: AppTheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildMetricCard(
+                context,
+                icon: Icons.receipt_long_rounded,
+                label: 'Payments This Month',
+                value: '$totalMonthPayments',
+                color: AppTheme.success,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildMetricCard(
+                context,
+                icon: Icons.trending_up_rounded,
+                label: 'Avg Revenue/Instructor',
+                value: allLinks.isNotEmpty
+                    ? '£${(revenuePerInstructor.values.fold(0.0, (a, b) => a + b) / allLinks.length).toStringAsFixed(0)}'
+                    : '£0',
+                color: AppTheme.info,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildMetricCard(
+                context,
+                icon: Icons.payment_rounded,
+                label: 'Total Payments',
+                value: '$totalPayments',
+                color: AppTheme.warning,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMetricCard(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: colorScheme.onSurface,
+                ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -250,8 +466,10 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
     double monthTotal,
     double monthChange,
     double yearTotal,
-    List<_TrendPoint> trend,
-  ) {
+    List<_TrendPoint> trend, {
+    double monthExpenses = 0,
+    double yearExpenses = 0,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
     final isPositive = monthChange >= 0;
 
@@ -328,8 +546,18 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
             ],
           ),
           const SizedBox(height: 8),
+          if (monthExpenses > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Expenses: £${monthExpenses.toStringAsFixed(2)}',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.7),
+                fontSize: 13,
+              ),
+            ),
+          ],
           Text(
-            'Year to date: £${yearTotal.toStringAsFixed(2)}',
+            'Year to date: £${yearTotal.toStringAsFixed(2)}${yearExpenses > 0 ? ' (expenses: £${yearExpenses.toStringAsFixed(2)})' : ''}',
             style: TextStyle(
               color: Colors.white.withOpacity(0.7),
               fontSize: 13,
@@ -352,35 +580,53 @@ class _OwnerReportsScreenState extends State<OwnerReportsScreen> {
     double toSchool,
     double toInstructor,
     double net,
-    double feeDue,
-  ) {
-    return Row(
+    double feeDue, {
+    double monthExpenses = 0,
+  }) {
+    return Column(
       children: [
-        Expanded(
-          child: _QuickStatCard(
-            label: 'To School',
-            value: '£${toSchool.toStringAsFixed(0)}',
-            icon: Icons.business_rounded,
-            color: AppTheme.success,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: _QuickStatCard(
+                label: 'To School',
+                value: '£${toSchool.toStringAsFixed(0)}',
+                icon: Icons.business_rounded,
+                color: AppTheme.success,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _QuickStatCard(
+                label: 'To Instructors',
+                value: '£${toInstructor.toStringAsFixed(0)}',
+                icon: Icons.person_rounded,
+                color: AppTheme.info,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _QuickStatCard(
-            label: 'To Instructors',
-            value: '£${toInstructor.toStringAsFixed(0)}',
-            icon: Icons.person_rounded,
-            color: AppTheme.info,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _QuickStatCard(
-            label: 'Net Profit',
-            value: '£${net.toStringAsFixed(0)}',
-            icon: Icons.trending_up_rounded,
-            color: net >= 0 ? AppTheme.primary : AppTheme.error,
-          ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _QuickStatCard(
+                label: 'Expenses',
+                value: '£${monthExpenses.toStringAsFixed(0)}',
+                icon: Icons.receipt_long_rounded,
+                color: AppTheme.error,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _QuickStatCard(
+                label: 'Net Profit',
+                value: '£${net.toStringAsFixed(0)}',
+                icon: Icons.trending_up_rounded,
+                color: net >= 0 ? AppTheme.primary : AppTheme.error,
+              ),
+            ),
+          ],
         ),
       ],
     );

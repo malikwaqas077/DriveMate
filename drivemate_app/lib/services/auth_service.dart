@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:crypto/crypto.dart';
@@ -119,29 +120,55 @@ class AuthService {
     }
   }
 
-  /// Sign in with Google. Returns [UserCredential] or throws.
-  /// User may cancel the flow (returns null from Google) — treat as cancelled, don't throw.
+  /// Sign in with Google. Returns [UserCredential] or null if user cancels.
+  /// On web: uses Firebase's signInWithPopup (obtains id_token correctly).
+  /// On mobile: uses google_sign_in plugin.
   Future<UserCredential?> signInWithGoogle() async {
-    final webClientId = DefaultFirebaseOptions.googleSignInWebClientId;
-    final googleSignIn = GoogleSignIn(
-      serverClientId: webClientId?.isNotEmpty == true ? webClientId : null,
-    );
-    final googleUser = await googleSignIn.signIn();
-    if (googleUser == null) return null;
-    final googleAuth = await googleUser.authentication;
-    final idToken = googleAuth.idToken;
-    final accessToken = googleAuth.accessToken;
-    if (idToken == null) {
-      throw FirebaseAuthException(
-        code: 'google-id-token-null',
-        message: 'Google Sign-In did not return an ID token. Set DefaultFirebaseOptions.googleSignInWebClientId in lib/firebase_options.dart to your Web client ID from Firebase Console → Authentication → Sign-in method → Google → Web SDK configuration.',
+    try {
+      if (kIsWeb) {
+        // On web, use Firebase's native signInWithPopup. This properly obtains
+        // the id_token and avoids the deprecated google_sign_in popup flow,
+        // which returns access_token but not id_token (causing google-id-token-null).
+        return await _auth.signInWithPopup(GoogleAuthProvider());
+      }
+
+      // On mobile, use google_sign_in
+      final webClientId = DefaultFirebaseOptions.googleSignInWebClientId;
+      final googleSignIn = GoogleSignIn(
+        serverClientId: webClientId?.isNotEmpty == true ? webClientId : null,
       );
+
+      final googleUser = await googleSignIn.signIn();
+      if (googleUser == null) return null;
+
+      final googleAuth = await googleUser.authentication;
+      final idToken = googleAuth.idToken;
+      final accessToken = googleAuth.accessToken;
+
+      if (idToken == null) {
+        throw FirebaseAuthException(
+          code: 'google-id-token-null',
+          message: 'Google Sign-In did not return an ID token.',
+        );
+      }
+
+      final credential = GoogleAuthProvider.credential(
+        idToken: idToken,
+        accessToken: accessToken,
+      );
+      return await _auth.signInWithCredential(credential);
+    } on FirebaseAuthException catch (e) {
+      // User closed popup or cancelled
+      if (e.code == 'auth/popup-closed-by-user' ||
+          e.code == 'auth/cancelled-popup-request') {
+        return null;
+      }
+      debugPrint('[AuthService] Google Sign-In error: $e');
+      rethrow;
+    } catch (e) {
+      debugPrint('[AuthService] Google Sign-In error: $e');
+      rethrow;
     }
-    final credential = GoogleAuthProvider.credential(
-      idToken: idToken,
-      accessToken: accessToken,
-    );
-    return _auth.signInWithCredential(credential);
   }
 
   /// Sign in with Apple. Returns [UserCredential] or null if user cancels.
@@ -185,7 +212,9 @@ class AuthService {
 
   /// Sign out and clear FCM token so this device no longer receives push notifications.
   Future<void> signOut() async {
-    await GoogleSignIn().signOut();
+    if (!kIsWeb) {
+      await GoogleSignIn().signOut();
+    }
     final userId = _auth.currentUser?.uid;
     if (userId != null) {
       await FCMService.instance.clearToken(userId);
