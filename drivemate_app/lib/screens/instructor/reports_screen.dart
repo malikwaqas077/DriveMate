@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/cancellation_request.dart';
+import '../../models/expense.dart';
 import '../../models/lesson.dart';
 import '../../models/payment.dart';
 import '../../models/student.dart';
@@ -50,6 +51,11 @@ class ReportsScreen extends StatelessWidget {
                       return const LoadingView(message: 'Loading payments...');
                     }
                     final payments = paymentSnapshot.data ?? [];
+                    return StreamBuilder<List<Expense>>(
+                      stream: _firestoreService
+                          .streamExpensesForInstructor(instructor.id),
+                      builder: (context, expensesSnapshot) {
+                        final expenses = expensesSnapshot.data ?? [];
                     return StreamBuilder(
                       stream: _firestoreService
                           .streamInstructorSchoolLink(instructor.id),
@@ -101,6 +107,11 @@ class ReportsScreen extends StatelessWidget {
                             .where((c) => c.status == 'pending')
                             .length;
 
+                        // Expenses
+                        final weekExpenses = _sumExpensesInRange(expenses, weekStart, weekEnd);
+                        final monthExpenses = _sumExpensesInRange(expenses, monthStart, monthEnd);
+                        final yearExpenses = _sumExpensesInRange(expenses, yearStart, yearEnd);
+
                         return ListView(
                           padding: const EdgeInsets.all(16),
                           children: [
@@ -137,6 +148,38 @@ class ReportsScreen extends StatelessWidget {
                               ),
                             ],
                             const SizedBox(height: 24),
+                            _sectionTitle(context, 'Expenses'),
+                            _ReportCard(
+                              title: 'This week',
+                              value: weekExpenses,
+                              subtitle: '${DateFormat('dd MMM').format(weekStart)} - ${DateFormat('dd MMM').format(weekEnd.subtract(const Duration(days: 1)))}',
+                              isExpense: true,
+                            ),
+                            _ReportCard(
+                              title: 'This month',
+                              value: monthExpenses,
+                              subtitle: DateFormat('MMMM yyyy').format(now),
+                              isExpense: true,
+                            ),
+                            _ReportCard(
+                              title: 'This year',
+                              value: yearExpenses,
+                              subtitle: DateFormat('yyyy').format(now),
+                              isExpense: true,
+                            ),
+                            const SizedBox(height: 24),
+                            _sectionTitle(context, 'Net Profit'),
+                            _NetProfitCard(
+                              weekEarnings: weekTotal,
+                              weekExpenses: weekExpenses,
+                              monthEarnings: monthTotal,
+                              monthExpenses: monthExpenses,
+                              yearEarnings: yearTotal,
+                              yearExpenses: yearExpenses,
+                              weekSchoolFee: weekFee,
+                              monthSchoolFee: monthFee,
+                            ),
+                            const SizedBox(height: 24),
                             _sectionTitle(context, 'Lessons'),
                             _LessonsSummaryCard(
                               weekLessons: weekLessons,
@@ -157,6 +200,8 @@ class ReportsScreen extends StatelessWidget {
                             ),
                           ],
                         );
+                      },
+                    );
                       },
                     );
                   },
@@ -218,6 +263,13 @@ class ReportsScreen extends StatelessWidget {
         .toList();
   }
 
+  double _sumExpensesInRange(
+    List<Expense> expenses, DateTime start, DateTime end) {
+    return expenses
+        .where((e) => !e.date.isBefore(start) && e.date.isBefore(end))
+        .fold(0, (sum, e) => sum + e.amount);
+  }
+
   DateTime _startOfWeek(DateTime date) {
     final start = date.subtract(Duration(days: date.weekday - 1));
     return DateTime(start.year, start.month, start.day);
@@ -229,11 +281,13 @@ class _ReportCard extends StatelessWidget {
     required this.title,
     required this.value,
     required this.subtitle,
+    this.isExpense = false,
   });
 
   final String title;
   final double value;
   final String subtitle;
+  final bool isExpense;
 
   @override
   Widget build(BuildContext context) {
@@ -246,8 +300,10 @@ class _ReportCard extends StatelessWidget {
             Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
-              '£${value.toStringAsFixed(2)}',
-              style: Theme.of(context).textTheme.headlineSmall,
+              '${isExpense ? '-' : ''}£${value.toStringAsFixed(2)}',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: isExpense ? AppTheme.error : AppTheme.success,
+                  ),
             ),
             const SizedBox(height: 4),
             Text(subtitle),
@@ -291,6 +347,131 @@ class _BalanceCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _NetProfitCard extends StatelessWidget {
+  const _NetProfitCard({
+    required this.weekEarnings,
+    required this.weekExpenses,
+    required this.monthEarnings,
+    required this.monthExpenses,
+    required this.yearEarnings,
+    required this.yearExpenses,
+    this.weekSchoolFee = 0,
+    this.monthSchoolFee = 0,
+  });
+
+  final double weekEarnings;
+  final double weekExpenses;
+  final double monthEarnings;
+  final double monthExpenses;
+  final double yearEarnings;
+  final double yearExpenses;
+  final double weekSchoolFee;
+  final double monthSchoolFee;
+
+  @override
+  Widget build(BuildContext context) {
+    final weekNet = weekEarnings - weekExpenses - weekSchoolFee;
+    final monthNet = monthEarnings - monthExpenses - monthSchoolFee;
+    // Approximate yearly school fee
+    final yearSchoolFee = weekSchoolFee > 0
+        ? weekSchoolFee * 52
+        : monthSchoolFee * 12;
+    final yearNet = yearEarnings - yearExpenses - yearSchoolFee;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildRow(context, 'This Week', weekEarnings, weekExpenses, weekSchoolFee, weekNet),
+            const Divider(height: 24),
+            _buildRow(context, 'This Month', monthEarnings, monthExpenses, monthSchoolFee, monthNet),
+            const Divider(height: 24),
+            _buildRow(context, 'This Year', yearEarnings, yearExpenses, yearSchoolFee, yearNet),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRow(BuildContext context, String period, double earnings,
+      double expenses, double schoolFee, double net) {
+    final textTheme = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(period, style: textTheme.titleSmall),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Income'),
+            Text(
+              '+£${earnings.toStringAsFixed(2)}',
+              style: const TextStyle(color: AppTheme.success, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Expenses'),
+            Text(
+              '-£${expenses.toStringAsFixed(2)}',
+              style: const TextStyle(color: AppTheme.error, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        if (schoolFee > 0) ...[
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('School Fee'),
+              Text(
+                '-£${schoolFee.toStringAsFixed(2)}',
+                style: const TextStyle(color: AppTheme.warning, fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: net >= 0
+                ? AppTheme.success.withOpacity(0.1)
+                : AppTheme.error.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Net Profit',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: net >= 0 ? AppTheme.success : AppTheme.error,
+                ),
+              ),
+              Text(
+                '${net >= 0 ? '' : '-'}£${net.abs().toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: net >= 0 ? AppTheme.success : AppTheme.error,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

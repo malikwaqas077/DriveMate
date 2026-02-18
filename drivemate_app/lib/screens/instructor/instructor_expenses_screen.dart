@@ -92,31 +92,7 @@ class InstructorExpensesScreen extends StatelessWidget {
         child: const Icon(Icons.delete_rounded, color: Colors.white),
       ),
       confirmDismiss: (_) async {
-        final confirm = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24)),
-            title: const Text('Delete expense?'),
-            content: Text('Delete "${expense.description}"?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () async {
-                  await firestoreService.deleteExpense(expense.id);
-                  if (context.mounted) Navigator.pop(context, true);
-                },
-                style:
-                    FilledButton.styleFrom(backgroundColor: AppTheme.error),
-                child: const Text('Delete'),
-              ),
-            ],
-          ),
-        );
-        return confirm ?? false;
+        return await _confirmDelete(context, expense, firestoreService) ?? false;
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -191,11 +167,98 @@ class InstructorExpensesScreen extends StatelessWidget {
                       color: AppTheme.error,
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    color: AppTheme.error,
+                    onPressed: () => _confirmDelete(context, expense, firestoreService),
+                    tooltip: 'Delete expense',
+                  ),
                 ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<bool?> _confirmDelete(
+    BuildContext context,
+    Expense expense,
+    FirestoreService firestoreService,
+  ) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: const BoxDecoration(
+                color: AppTheme.errorLight,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.delete_outline_rounded,
+                color: AppTheme.error,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 16),
+            const Expanded(child: Text('Delete expense?')),
+          ],
+        ),
+        content: Text('Delete "${expense.description}"? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              try {
+                await firestoreService.deleteExpense(expense.id);
+                if (context.mounted) {
+                  Navigator.pop(context, true);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Row(
+                        children: [
+                          Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                          SizedBox(width: 12),
+                          Text('Expense deleted'),
+                        ],
+                      ),
+                      backgroundColor: AppTheme.success,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context, false);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error deleting expense: $e'),
+                      backgroundColor: AppTheme.error,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
+            },
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
   }

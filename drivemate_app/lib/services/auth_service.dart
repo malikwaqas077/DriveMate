@@ -75,6 +75,19 @@ class AuthService {
     return _auth.sendPasswordResetEmail(email: email.trim());
   }
 
+  /// Update password for an existing Firebase Auth account
+  /// Note: This requires Admin SDK via Cloud Functions for security
+  Future<void> updateStudentPassword({
+    required String phone,
+    required String newPassword,
+  }) async {
+    // This would need to be implemented via Cloud Functions with Admin SDK
+    // For now, we'll throw an exception indicating this needs server-side handling
+    throw UnimplementedError(
+      'Password update requires Admin SDK. Please implement via Cloud Functions.',
+    );
+  }
+
   Future<UserCredential> createStudentLogin({
     String? email,
     String? phone,
@@ -84,6 +97,7 @@ class AuthService {
       throw ArgumentError('Either email or phone must be provided');
     }
     
+    // Prefer phone over email for student accounts (phone is more reliable)
     final authEmail = phone != null ? phoneToEmail(phone) : email!.trim();
     
     final secondaryApp = await Firebase.initializeApp(
@@ -96,6 +110,19 @@ class AuthService {
         email: authEmail,
         password: password,
       );
+    } on FirebaseAuthException catch (e) {
+      // If email already exists, the account might be orphaned (from deleted student)
+      // We'll let the caller handle this - they can check if profile exists and reuse the account
+      if (e.code == 'email-already-in-use') {
+        // Try to get the user by email to see if account exists
+        // Note: We can't get user without signing in, so we'll throw a special exception
+        throw FirebaseAuthException(
+          code: 'email-already-in-use',
+          message: 'Account exists for this phone number. If student was deleted, the account can be reused.',
+        );
+      }
+      // Rethrow other errors
+      rethrow;
     } finally {
       await secondaryApp.delete();
     }

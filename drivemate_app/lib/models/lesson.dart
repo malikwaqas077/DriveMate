@@ -12,6 +12,7 @@ class Lesson {
     this.status = 'scheduled',
     this.notes,
     this.studentReflection,
+    this.testResult,
   });
 
   final String id;
@@ -24,6 +25,7 @@ class Lesson {
   final String status; // 'scheduled', 'completed', 'cancelled'
   final String? notes;
   final String? studentReflection;
+  final String? testResult; // 'pass', 'fail', or null
 
   Lesson copyWith({
     String? id,
@@ -36,6 +38,7 @@ class Lesson {
     String? status,
     String? notes,
     String? studentReflection,
+    String? testResult,
   }) {
     return Lesson(
       id: id ?? this.id,
@@ -48,6 +51,7 @@ class Lesson {
       status: status ?? this.status,
       notes: notes ?? this.notes,
       studentReflection: studentReflection ?? this.studentReflection,
+      testResult: testResult ?? this.testResult,
     );
   }
 
@@ -62,6 +66,7 @@ class Lesson {
       'status': status,
       'notes': notes,
       if (studentReflection != null) 'studentReflection': studentReflection,
+      if (testResult != null) 'testResult': testResult,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     };
@@ -80,6 +85,7 @@ class Lesson {
       status: (data['status'] ?? 'scheduled') as String,
       notes: data['notes'] as String?,
       studentReflection: data['studentReflection'] as String?,
+      testResult: data['testResult'] as String?,
     );
   }
 

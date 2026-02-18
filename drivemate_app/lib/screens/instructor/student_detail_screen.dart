@@ -4,14 +4,12 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 
-import '../../models/achievement.dart';
 import '../../models/lesson.dart';
 import '../../models/payment.dart';
 import '../../models/student.dart';
 import '../../models/user_profile.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
-import '../../widgets/achievement_badge.dart';
 import '../../widgets/empty_view.dart';
 import '../../widgets/loading_view.dart';
 import 'student_competencies_screen.dart';
@@ -149,9 +147,6 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
                       _buildHeaderSection(context, student),
                       const SizedBox(height: 16),
                       _buildQuickStats(context, student, summary),
-                      const SizedBox(height: 16),
-                      // Feature 2.7: Achievements section
-                      _buildAchievementsSection(context),
                       const SizedBox(height: 16),
                       _buildOverviewSection(context, student, summary, payments),
                       const SizedBox(height: 16),
@@ -404,42 +399,6 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildAchievementsSection(BuildContext context) {
-    return StreamBuilder<List<Achievement>>(
-      stream: _firestoreService.streamAchievements(widget.studentId),
-      builder: (context, snapshot) {
-        final achievements = snapshot.data ?? [];
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.emoji_events_outlined, color: Colors.amber.shade700, size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Achievements',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                AchievementBadgesWidget(
-                  achievements: achievements,
-                  showLocked: true,
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 

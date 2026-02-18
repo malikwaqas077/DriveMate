@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../models/expense.dart';
 import '../../models/lesson.dart';
 import '../../models/payment.dart';
 import '../../models/student.dart';
@@ -9,6 +10,7 @@ import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/empty_view.dart';
 import '../../widgets/loading_view.dart';
+import '../owner/add_expense_screen.dart';
 
 class MoneyScreen extends StatefulWidget {
   const MoneyScreen({super.key, required this.instructor});
@@ -25,12 +27,20 @@ class _MoneyScreenState extends State<MoneyScreen>
   late TabController _tabController;
   String _expectedIncomePeriod = 'week'; // week, month, all
 
+  // Income tab filters
+  String _incomeSearch = '';
+  String _incomeMethodFilter = 'all';
+
+  // Expenses tab filters
+  String _expenseSearch = '';
+  String _expenseCategoryFilter = 'all';
+
   static const double _defaultHourlyRate = 40.0;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -68,12 +78,21 @@ class _MoneyScreenState extends State<MoneyScreen>
                 }
                 final lessons = lessonsSnapshot.data ?? [];
 
-                return _buildContent(
-                  context,
-                  students,
-                  studentMap,
-                  payments,
-                  lessons,
+                return StreamBuilder<List<Expense>>(
+                  stream: _firestoreService
+                      .streamExpensesForInstructor(widget.instructor.id),
+                  builder: (context, expensesSnapshot) {
+                    final expenses = expensesSnapshot.data ?? [];
+
+                    return _buildContent(
+                      context,
+                      students,
+                      studentMap,
+                      payments,
+                      lessons,
+                      expenses,
+                    );
+                  },
                 );
               },
             );
@@ -89,6 +108,7 @@ class _MoneyScreenState extends State<MoneyScreen>
     Map<String, Student> studentMap,
     List<Payment> payments,
     List<Lesson> lessons,
+    List<Expense> expenses,
   ) {
     final colorScheme = Theme.of(context).colorScheme;
     final now = DateTime.now();
@@ -102,14 +122,22 @@ class _MoneyScreenState extends State<MoneyScreen>
     final weekEnd = weekStart.add(const Duration(days: 7));
     final yearStart = DateTime(now.year, 1, 1);
 
-    final thisMonth = _sumInRange(payments, monthStart, monthEnd);
-    final lastMonth = _sumInRange(payments, lastMonthStart, lastMonthEnd);
-    final thisWeek = _sumInRange(payments, weekStart, weekEnd);
-    final thisYear = _sumInRange(payments, yearStart, monthEnd);
+    final thisMonthIncome = _sumInRange(payments, monthStart, monthEnd);
+    final lastMonthIncome = _sumInRange(payments, lastMonthStart, lastMonthEnd);
+    final thisWeekIncome = _sumInRange(payments, weekStart, weekEnd);
+    final thisYearIncome = _sumInRange(payments, yearStart, monthEnd);
 
-    final monthChange = lastMonth > 0
-        ? ((thisMonth - lastMonth) / lastMonth * 100)
-        : (thisMonth > 0 ? 100.0 : 0.0);
+    final thisMonthExpenses = _sumExpensesInRange(expenses, monthStart, monthEnd);
+    final thisWeekExpenses = _sumExpensesInRange(expenses, weekStart, weekEnd);
+    final thisYearExpenses = _sumExpensesInRange(expenses, yearStart, monthEnd);
+
+    final thisMonthNet = thisMonthIncome - thisMonthExpenses;
+    final lastMonthExpenses = _sumExpensesInRange(expenses, lastMonthStart, lastMonthEnd);
+    final lastMonthNet = lastMonthIncome - lastMonthExpenses;
+
+    final monthChange = lastMonthNet.abs() > 0
+        ? ((thisMonthNet - lastMonthNet) / lastMonthNet.abs() * 100)
+        : (thisMonthNet != 0 ? 100.0 : 0.0);
 
     // Expected income from scheduled lessons with period filter
     final expectedIncomeData = _computeExpectedIncomeWithStudents(
@@ -124,15 +152,22 @@ class _MoneyScreenState extends State<MoneyScreen>
           SliverToBoxAdapter(
             child: Column(
               children: [
-                // Month earnings hero card
+                // Month net profit hero card
                 _buildMonthHeroCard(
                   context,
-                  thisMonth,
+                  thisMonthIncome,
+                  thisMonthExpenses,
+                  thisMonthNet,
                   monthChange,
-                  lastMonth,
+                  lastMonthNet,
                 ),
-                // Quick stats row
-                _buildQuickStats(context, thisWeek, thisMonth, thisYear),
+                // Quick stats row - income vs expenses
+                _buildQuickStats(
+                  context,
+                  thisWeekIncome, thisWeekExpenses,
+                  thisMonthIncome, thisMonthExpenses,
+                  thisYearIncome, thisYearExpenses,
+                ),
               ],
             ),
           ),
@@ -160,29 +195,427 @@ class _MoneyScreenState extends State<MoneyScreen>
               studentMap,
               students,
             ),
+            // Expenses tab
+            _buildExpensesTab(context, expenses),
           ],
         ),
       ),
-      floatingActionButton: students.isEmpty
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () =>
-                  _showAddPayment(context, students, widget.instructor.schoolId),
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add Payment'),
-            ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showAddOptions(context, students),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Add'),
+      ),
     );
+  }
+
+  void _showAddOptions(BuildContext context, List<Student> students) {
+    final schoolId = widget.instructor.schoolId ?? '';
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppTheme.successLight,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.add_card_rounded, color: AppTheme.success),
+              ),
+              title: const Text('Add Payment'),
+              subtitle: const Text('Record income from a student'),
+              onTap: () {
+                Navigator.pop(context);
+                if (students.isNotEmpty) {
+                  _showAddPayment(context, students, widget.instructor.schoolId);
+                }
+              },
+            ),
+            ListTile(
+              leading: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppTheme.errorLight,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.receipt_long_rounded, color: AppTheme.error),
+              ),
+              title: const Text('Add Expense'),
+              subtitle: const Text('Record a business expense'),
+              onTap: () {
+                Navigator.pop(context);
+                if (schoolId.isNotEmpty) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AddExpenseScreen(
+                        schoolId: schoolId,
+                        instructorId: widget.instructor.id,
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpensesTab(BuildContext context, List<Expense> expenses) {
+    final schoolId = widget.instructor.schoolId ?? '';
+
+    if (expenses.isEmpty) {
+      return Center(
+        child: EmptyView(
+          message: 'No expenses yet',
+          subtitle: 'Tap + to record your first expense',
+          type: EmptyViewType.expenses,
+          actionLabel: 'Add Expense',
+          onAction: schoolId.isEmpty
+              ? null
+              : () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AddExpenseScreen(
+                        schoolId: schoolId,
+                        instructorId: widget.instructor.id,
+                      ),
+                    ),
+                  );
+                },
+        ),
+      );
+    }
+
+    // Apply filters
+    final searchLower = _expenseSearch.toLowerCase();
+    final filtered = expenses.where((e) {
+      if (_expenseCategoryFilter != 'all' && e.category != _expenseCategoryFilter) {
+        return false;
+      }
+      if (searchLower.isNotEmpty) {
+        final matchDesc = e.description.toLowerCase().contains(searchLower);
+        final matchAmount = e.amount.toStringAsFixed(2).contains(searchLower);
+        final matchDate = DateFormat('d MMM yyyy').format(e.date).toLowerCase().contains(searchLower);
+        final matchCategory = Expense.categoryLabel(e.category).toLowerCase().contains(searchLower);
+        if (!matchDesc && !matchAmount && !matchDate && !matchCategory) return false;
+      }
+      return true;
+    }).toList();
+
+    // Group by month
+    final groupedExpenses = <String, List<Expense>>{};
+    for (final expense in filtered) {
+      final monthKey = DateFormat('yyyy-MM').format(expense.date);
+      groupedExpenses.putIfAbsent(monthKey, () => []).add(expense);
+    }
+
+    final sortedMonths = groupedExpenses.keys.toList()
+      ..sort((a, b) => b.compareTo(a));
+
+    return Column(
+      children: [
+        // Search bar
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: TextField(
+            decoration: InputDecoration(
+              hintText: 'Search by name, amount, date...',
+              prefixIcon: const Icon(Icons.search_rounded, size: 20),
+              suffixIcon: _expenseSearch.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 20),
+                      onPressed: () => setState(() => _expenseSearch = ''),
+                    )
+                  : null,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+            onChanged: (v) => setState(() => _expenseSearch = v),
+          ),
+        ),
+        // Category filter chips
+        SizedBox(
+          height: 48,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            children: [
+              _buildCategoryChip('all', 'All'),
+              ...Expense.categories.map(
+                (c) => _buildCategoryChip(c, Expense.categoryLabel(c)),
+              ),
+            ],
+          ),
+        ),
+        // Results
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Text(
+                    'No expenses match your filters',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                  itemCount: sortedMonths.length,
+                  itemBuilder: (context, index) {
+                    final monthKey = sortedMonths[index];
+                    final monthExpenses = groupedExpenses[monthKey]!
+                      ..sort((a, b) => b.date.compareTo(a.date));
+                    final monthTotal =
+                        monthExpenses.fold<double>(0, (sum, e) => sum + e.amount);
+                    final date = DateTime.parse('$monthKey-01');
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                DateFormat('MMMM yyyy').format(date),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.neutral500,
+                                ),
+                              ),
+                              Text(
+                                '-£${monthTotal.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.error,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ...monthExpenses.map((expense) =>
+                            _buildExpenseCard(context, expense, schoolId)),
+                      ],
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCategoryChip(String value, String label) {
+    final isSelected = _expenseCategoryFilter == value;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: FilterChip(
+        label: Text(label),
+        selected: isSelected,
+        onSelected: (_) => setState(() => _expenseCategoryFilter = value),
+        selectedColor: AppTheme.error.withOpacity(0.15),
+        checkmarkColor: AppTheme.error,
+        labelStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+          color: isSelected ? AppTheme.error : null,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+  }
+
+  Widget _buildExpenseCard(BuildContext context, Expense expense, String schoolId) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Dismissible(
+      key: Key(expense.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.error,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.delete_rounded, color: Colors.white),
+      ),
+      confirmDismiss: (_) => _confirmDeleteExpense(context, expense),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colorScheme.outlineVariant),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AddExpenseScreen(
+                    schoolId: schoolId,
+                    instructorId: widget.instructor.id,
+                    expense: expense,
+                  ),
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppTheme.error.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Expense.categoryIcon(expense.category),
+                      color: AppTheme.error,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          expense.description,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: colorScheme.onSurface,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${Expense.categoryLabel(expense.category)} · ${DateFormat('d MMM').format(expense.date)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    '-£${expense.amount.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.error,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _confirmDeleteExpense(BuildContext context, Expense expense) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: const BoxDecoration(
+                color: AppTheme.errorLight,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline_rounded, color: AppTheme.error, size: 22),
+            ),
+            const SizedBox(width: 16),
+            const Expanded(child: Text('Delete expense?')),
+          ],
+        ),
+        content: Text('Delete "${expense.description}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              try {
+                await _firestoreService.deleteExpense(expense.id);
+                if (context.mounted) {
+                  Navigator.pop(context, true);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Row(
+                        children: [
+                          Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                          SizedBox(width: 12),
+                          Text('Expense deleted'),
+                        ],
+                      ),
+                      backgroundColor: AppTheme.success,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context, false);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error deleting expense: $e'),
+                      backgroundColor: AppTheme.error,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
+            },
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   Widget _buildMonthHeroCard(
     BuildContext context,
-    double thisMonth,
+    double monthIncome,
+    double monthExpenses,
+    double monthNet,
     double monthChange,
-    double lastMonth,
+    double lastMonthNet,
   ) {
     final now = DateTime.now();
     final isPositive = monthChange >= 0;
-    
+
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(20),
@@ -216,7 +649,7 @@ class _MoneyScreenState extends State<MoneyScreen>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '£${thisMonth.toStringAsFixed(2)}',
+                    '${monthNet < 0 ? '-' : ''}£${monthNet.abs().toStringAsFixed(2)}',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 36,
@@ -224,9 +657,18 @@ class _MoneyScreenState extends State<MoneyScreen>
                       letterSpacing: -1,
                     ),
                   ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Net Profit',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.7),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
-              if (lastMonth > 0)
+              if (lastMonthNet.abs() > 0)
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -260,13 +702,120 @@ class _MoneyScreenState extends State<MoneyScreen>
                 ),
             ],
           ),
-          if (lastMonth > 0) ...[
-            const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          // Income & Expenses breakdown
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.arrow_downward_rounded,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Income',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.7),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              '£${monthIncome.toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.arrow_upward_rounded,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Expenses',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.7),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              '£${monthExpenses.toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (lastMonthNet.abs() > 0) ...[
+            const SizedBox(height: 10),
             Text(
-              'vs £${lastMonth.toStringAsFixed(2)} last month',
+              'vs £${lastMonthNet.abs().toStringAsFixed(2)} net last month',
               style: TextStyle(
                 color: Colors.white.withOpacity(0.7),
-                fontSize: 13,
+                fontSize: 12,
               ),
             ),
           ],
@@ -277,9 +826,9 @@ class _MoneyScreenState extends State<MoneyScreen>
 
   Widget _buildQuickStats(
     BuildContext context,
-    double thisWeek,
-    double thisMonth,
-    double thisYear,
+    double weekIncome, double weekExpenses,
+    double monthIncome, double monthExpenses,
+    double yearIncome, double yearExpenses,
   ) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -288,27 +837,27 @@ class _MoneyScreenState extends State<MoneyScreen>
           Expanded(
             child: _QuickStatCard(
               label: 'This Week',
-              value: '£${thisWeek.toStringAsFixed(0)}',
+              income: weekIncome,
+              expenses: weekExpenses,
               icon: Icons.calendar_view_week_rounded,
-              color: AppTheme.info,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: _QuickStatCard(
               label: 'This Month',
-              value: '£${thisMonth.toStringAsFixed(0)}',
+              income: monthIncome,
+              expenses: monthExpenses,
               icon: Icons.calendar_month_rounded,
-              color: AppTheme.success,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: _QuickStatCard(
               label: 'This Year',
-              value: '£${thisYear.toStringAsFixed(0)}',
+              income: yearIncome,
+              expenses: yearExpenses,
               icon: Icons.calendar_today_rounded,
-              color: AppTheme.primary,
             ),
           ),
         ],
@@ -795,9 +1344,26 @@ class _MoneyScreenState extends State<MoneyScreen>
       );
     }
 
+    // Apply filters
+    final searchLower = _incomeSearch.toLowerCase();
+    final filtered = payments.where((p) {
+      if (_incomeMethodFilter != 'all' && p.method != _incomeMethodFilter) {
+        return false;
+      }
+      if (searchLower.isNotEmpty) {
+        final studentName = (studentMap[p.studentId]?.name ?? 'Student').toLowerCase();
+        final matchName = studentName.contains(searchLower);
+        final matchAmount = p.amount.toStringAsFixed(2).contains(searchLower);
+        final matchDate = DateFormat('d MMM yyyy').format(p.createdAt).toLowerCase().contains(searchLower);
+        final matchMethod = _getMethodLabel(p.method).toLowerCase().contains(searchLower);
+        if (!matchName && !matchAmount && !matchDate && !matchMethod) return false;
+      }
+      return true;
+    }).toList();
+
     // Group by month
     final groupedPayments = <String, List<Payment>>{};
-    for (final payment in payments) {
+    for (final payment in filtered) {
       final monthKey = DateFormat('yyyy-MM').format(payment.createdAt);
       groupedPayments.putIfAbsent(monthKey, () => []).add(payment);
     }
@@ -805,53 +1371,124 @@ class _MoneyScreenState extends State<MoneyScreen>
     final sortedMonths = groupedPayments.keys.toList()
       ..sort((a, b) => b.compareTo(a));
 
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-      itemCount: sortedMonths.length,
-      itemBuilder: (context, index) {
-        final monthKey = sortedMonths[index];
-        final monthPayments = groupedPayments[monthKey]!
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        final monthTotal =
-            monthPayments.fold<double>(0, (sum, p) => sum + p.amount);
-        final date = DateTime.parse('$monthKey-01');
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    DateFormat('MMMM yyyy').format(date),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.neutral500,
-                    ),
-                  ),
-                  Text(
-                    '£${monthTotal.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.success,
-                    ),
-                  ),
-                ],
-              ),
+    return Column(
+      children: [
+        // Search bar
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: TextField(
+            decoration: InputDecoration(
+              hintText: 'Search by student, amount, date...',
+              prefixIcon: const Icon(Icons.search_rounded, size: 20),
+              suffixIcon: _incomeSearch.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 20),
+                      onPressed: () => setState(() => _incomeSearch = ''),
+                    )
+                  : null,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
-            ...monthPayments.map((payment) => _buildPaymentCard(
-                  context,
-                  payment,
-                  studentMap,
-                  students,
-                )),
-          ],
-        );
-      },
+            onChanged: (v) => setState(() => _incomeSearch = v),
+          ),
+        ),
+        // Method filter chips
+        SizedBox(
+          height: 48,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            children: [
+              _buildIncomeMethodChip('all', 'All'),
+              _buildIncomeMethodChip('cash', 'Cash'),
+              _buildIncomeMethodChip('bank_transfer', 'Bank'),
+              _buildIncomeMethodChip('card', 'Card'),
+              _buildIncomeMethodChip('other', 'Other'),
+            ],
+          ),
+        ),
+        // Results
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Text(
+                    'No income matches your filters',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                  itemCount: sortedMonths.length,
+                  itemBuilder: (context, index) {
+                    final monthKey = sortedMonths[index];
+                    final monthPayments = groupedPayments[monthKey]!
+                      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                    final monthTotal =
+                        monthPayments.fold<double>(0, (sum, p) => sum + p.amount);
+                    final date = DateTime.parse('$monthKey-01');
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                DateFormat('MMMM yyyy').format(date),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.neutral500,
+                                ),
+                              ),
+                              Text(
+                                '£${monthTotal.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.success,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ...monthPayments.map((payment) => _buildPaymentCard(
+                              context,
+                              payment,
+                              studentMap,
+                              students,
+                            )),
+                      ],
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildIncomeMethodChip(String value, String label) {
+    final isSelected = _incomeMethodFilter == value;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: FilterChip(
+        label: Text(label),
+        selected: isSelected,
+        onSelected: (_) => setState(() => _incomeMethodFilter = value),
+        selectedColor: AppTheme.success.withOpacity(0.15),
+        checkmarkColor: AppTheme.success,
+        labelStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+          color: isSelected ? AppTheme.success : null,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
     );
   }
 
@@ -865,89 +1502,159 @@ class _MoneyScreenState extends State<MoneyScreen>
     final name = student?.name ?? 'Student';
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
+    return Dismissible(
+      key: Key(payment.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.error,
           borderRadius: BorderRadius.circular(12),
-          onTap: () => _showEditPayment(context, payment),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
+        ),
+        child: const Icon(Icons.delete_rounded, color: Colors.white),
+      ),
+      confirmDismiss: (_) async {
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            title: Row(
               children: [
                 Container(
                   width: 44,
                   height: 44,
-                  decoration: BoxDecoration(
-                    color: _getMethodBackgroundColor(payment.method),
-                    borderRadius: BorderRadius.circular(10),
+                  decoration: const BoxDecoration(
+                    color: AppTheme.errorLight,
+                    shape: BoxShape.circle,
                   ),
-                  child: Icon(
-                    _getMethodIcon(payment.method),
-                    color: _getMethodColor(payment.method),
-                    size: 20,
-                  ),
+                  child: const Icon(Icons.delete_outline_rounded, color: AppTheme.error, size: 22),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: colorScheme.onSurface,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Text(
-                            DateFormat('d MMM, HH:mm').format(payment.createdAt),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            width: 4,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: colorScheme.onSurfaceVariant,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '${payment.hoursPurchased.toStringAsFixed(1)}h',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  '+£${payment.amount.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.success,
-                  ),
-                ),
+                const SizedBox(width: 16),
+                const Expanded(child: Text('Delete payment?')),
               ],
+            ),
+            content: Text('Delete £${payment.amount.toStringAsFixed(2)} payment from $name? Hours will be restored to the student.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        );
+        if (confirm == true) {
+          await _firestoreService.deletePayment(payment);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Row(
+                  children: [
+                    Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                    SizedBox(width: 12),
+                    Text('Payment deleted'),
+                  ],
+                ),
+                backgroundColor: AppTheme.success,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            );
+          }
+          return true;
+        }
+        return false;
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colorScheme.outlineVariant),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => _showEditPayment(context, payment),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: _getMethodBackgroundColor(payment.method),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      _getMethodIcon(payment.method),
+                      color: _getMethodColor(payment.method),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Text(
+                              DateFormat('d MMM, HH:mm').format(payment.createdAt),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 4,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: colorScheme.onSurfaceVariant,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${payment.hoursPurchased.toStringAsFixed(1)}h',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    '+£${payment.amount.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.success,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -965,6 +1672,12 @@ class _MoneyScreenState extends State<MoneyScreen>
     return payments
         .where((p) => !p.createdAt.isBefore(start) && p.createdAt.isBefore(end))
         .fold(0, (sum, p) => sum + p.amount);
+  }
+
+  double _sumExpensesInRange(List<Expense> expenses, DateTime start, DateTime end) {
+    return expenses
+        .where((e) => !e.date.isBefore(start) && e.date.isBefore(end))
+        .fold(0, (sum, e) => sum + e.amount);
   }
 
   IconData _getMethodIcon(String method) {
@@ -1776,7 +2489,8 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
         dividerColor: colorScheme.outlineVariant,
         tabs: const [
           Tab(text: 'Overview'),
-          Tab(text: 'Transactions'),
+          Tab(text: 'Income'),
+          Tab(text: 'Expenses'),
         ],
       ),
     );
@@ -1796,21 +2510,22 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
 class _QuickStatCard extends StatelessWidget {
   const _QuickStatCard({
     required this.label,
-    required this.value,
+    required this.income,
+    required this.expenses,
     required this.icon,
-    required this.color,
   });
 
   final String label;
-  final String value;
+  final double income;
+  final double expenses;
   final IconData icon;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final net = income - expenses;
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
@@ -1819,21 +2534,74 @@ class _QuickStatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 18),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: colorScheme.onSurface,
-            ),
+          Row(
+            children: [
+              Icon(icon, color: colorScheme.onSurfaceVariant, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              color: colorScheme.onSurfaceVariant,
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.arrow_downward_rounded, color: AppTheme.success, size: 12),
+              const SizedBox(width: 2),
+              Flexible(
+                child: Text(
+                  '£${income.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.success,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              const Icon(Icons.arrow_upward_rounded, color: AppTheme.error, size: 12),
+              const SizedBox(width: 2),
+              Flexible(
+                child: Text(
+                  '£${expenses.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.error,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            decoration: BoxDecoration(
+              color: net >= 0
+                  ? AppTheme.success.withOpacity(0.1)
+                  : AppTheme.error.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              '${net < 0 ? '-' : ''}£${net.abs().toStringAsFixed(0)}',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: net >= 0 ? AppTheme.success : AppTheme.error,
+              ),
             ),
           ),
         ],

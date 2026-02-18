@@ -602,3 +602,80 @@ export const onMessageCreated = functions.firestore
       `Sent chat notification to ${recipientId} from ${senderId} in conversation ${conversationId}`
     );
   });
+
+/**
+ * Triggered when a new announcement is created
+ * Sends push notification to all users in the school matching the audience
+ */
+export const onAnnouncementCreated = functions.firestore
+  .document("school_announcements/{announcementId}")
+  .onCreate(async (snapshot, context) => {
+    const announcement = snapshot.data();
+    const schoolId = announcement.schoolId;
+    const audience = announcement.audience || "all"; // 'all', 'instructors', 'students'
+    const title = announcement.title || "New Announcement";
+    const body = announcement.body || "";
+
+    if (!schoolId) {
+      functions.logger.warn("Announcement created without schoolId");
+      return;
+    }
+
+    functions.logger.info(
+      `New announcement "${title}" for school ${schoolId}, audience: ${audience}`
+    );
+
+    // Query all users in this school
+    let usersQuery = db
+      .collection("users")
+      .where("schoolId", "==", schoolId);
+
+    const usersSnapshot = await usersQuery.get();
+
+    if (usersSnapshot.empty) {
+      functions.logger.info(`No users found for school ${schoolId}`);
+      return;
+    }
+
+    let sentCount = 0;
+
+    for (const userDoc of usersSnapshot.docs) {
+      const userData = userDoc.data();
+      const fcmToken = userData.fcmToken;
+      const userRole = userData.role;
+
+      // Skip users without FCM token
+      if (!fcmToken) continue;
+
+      // Skip the author of the announcement
+      if (userDoc.id === announcement.authorId) continue;
+
+      // Check audience filter
+      if (audience === "instructors" && userRole !== "instructor") continue;
+      if (audience === "students" && userRole !== "student") continue;
+
+      // Send notification
+      try {
+        await sendPushNotification(
+          fcmToken,
+          title,
+          body.length > 150 ? body.substring(0, 150) + "..." : body,
+          {
+            type: "announcement",
+            announcementId: context.params.announcementId,
+            schoolId: schoolId,
+          }
+        );
+        sentCount++;
+      } catch (error) {
+        functions.logger.error(
+          `Failed to send announcement to user ${userDoc.id}:`,
+          error
+        );
+      }
+    }
+
+    functions.logger.info(
+      `Sent announcement "${title}" to ${sentCount} users in school ${schoolId}`
+    );
+  });

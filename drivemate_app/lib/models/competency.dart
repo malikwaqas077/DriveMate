@@ -55,16 +55,129 @@ class Competency {
     );
   }
 
-  static const List<String> predefinedSkills = [
-    'Parallel Parking',
-    'Reverse Bay Parking',
-    'Highway Driving',
-    'Roundabouts',
-    'Emergency Stop',
-    'Hill Start',
-    'Junctions',
-    'Independent Driving',
-    'Mirror Checks',
-    'Speed Control',
+  /// DVSA 5-level progression scale labels
+  static const List<String> ratingLabels = [
+    'Not started',
+    'Introduced',
+    'Directed',
+    'Prompted',
+    'Rarely prompted',
+    'Independent',
   ];
+
+  static String ratingLabel(int rating) {
+    if (rating < 0 || rating >= ratingLabels.length) return ratingLabels[0];
+    return ratingLabels[rating];
+  }
+
+  /// All skills in a flat list (for backward compat)
+  static List<String> get predefinedSkills =>
+      skillSections.expand((s) => s.skills).toList();
+
+  /// DVSA-based structured competency sections, ordered by learning progression
+  static const List<SkillSection> skillSections = [
+    // Section 1 - Pre-driving foundation
+    SkillSection(
+      title: 'The Basics',
+      icon: 'directions_car',
+      skills: [
+        'Legal responsibilities',
+        'Vehicle safety checks (Show Me/Tell Me)',
+        'Cockpit drill (DSSSM)',
+      ],
+    ),
+    // Section 2 - Core vehicle handling
+    SkillSection(
+      title: 'Vehicle Control',
+      icon: 'settings',
+      skills: [
+        'Controls and instruments',
+        'Moving off and stopping',
+        'Clutch control',
+        'Gear selection and changing',
+        'Steering control',
+        'Safe positioning on road',
+      ],
+    ),
+    // Section 3 - Awareness & communication
+    SkillSection(
+      title: 'Observations & Signals',
+      icon: 'visibility',
+      skills: [
+        'Mirrors - vision and use (MSM)',
+        'Signals - indicating correctly',
+        'Anticipation and planning',
+        'Use of speed',
+        'Following distance',
+        'Awareness of other traffic',
+      ],
+    ),
+    // Section 4 - Core road navigation
+    SkillSection(
+      title: 'Junctions & Roundabouts',
+      icon: 'turn_right',
+      skills: [
+        'Junctions - approach and observation',
+        'Junctions - turning left',
+        'Junctions - turning right',
+        'Roundabouts',
+        'Pedestrian crossings',
+        'Clearance and obstructions',
+      ],
+    ),
+    // Section 5 - Low-speed control
+    SkillSection(
+      title: 'Manoeuvres',
+      icon: 'swap_calls',
+      skills: [
+        'Parallel parking',
+        'Bay parking (forward and reverse)',
+        'Pulling up on the right and reversing',
+        'Emergency/controlled stop',
+        'Hill start',
+      ],
+    ),
+    // Section 6 - Different road types
+    SkillSection(
+      title: 'Road Types',
+      icon: 'road',
+      skills: [
+        'Country roads',
+        'Dual carriageways',
+        'Motorway driving',
+      ],
+    ),
+    // Section 7 - Environmental challenges
+    SkillSection(
+      title: 'Driving Conditions',
+      icon: 'wb_cloudy',
+      skills: [
+        'Driving in the dark',
+        'Weather conditions (rain, fog, ice)',
+        'Eco-safe driving',
+      ],
+    ),
+    // Section 8 - Test readiness
+    SkillSection(
+      title: 'Test Readiness',
+      icon: 'emoji_events',
+      skills: [
+        'Independent driving and sat nav',
+        'Progress - appropriate speed',
+        'Progress - undue hesitation',
+      ],
+    ),
+  ];
+}
+
+class SkillSection {
+  const SkillSection({
+    required this.title,
+    required this.icon,
+    required this.skills,
+  });
+
+  final String title;
+  final String icon;
+  final List<String> skills;
 }

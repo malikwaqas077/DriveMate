@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -1146,6 +1147,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
     String? loginPhone;
     String? loginPassword;
     String? loginError;
+    String? loginWarning;
     if (createLogin && studentId != null) {
       try {
         final credential = await _authService.createStudentLogin(
@@ -1155,18 +1157,54 @@ class _StudentsScreenState extends State<StudentsScreen> {
         );
         final user = credential.user;
         if (user != null) {
-          final profile = UserProfile(
-            id: user.uid,
-            role: 'student',
-            name: name,
-            email: email.isEmpty ? AuthService.phoneToEmail(phone) : email,
-            phone: phone,
-            password: password, // Store password for instructor access
-            studentId: studentId,
-          );
-          await _firestoreService.createUserProfile(profile);
+          // Check if user profile already exists
+          final existingProfile = await _firestoreService.getUserProfile(user.uid);
+          if (existingProfile == null) {
+            // Create new profile
+            final profile = UserProfile(
+              id: user.uid,
+              role: 'student',
+              name: name,
+              email: email.isEmpty ? AuthService.phoneToEmail(phone) : email,
+              phone: phone,
+              password: password, // Store password for instructor access
+              studentId: studentId,
+            );
+            await _firestoreService.createUserProfile(profile);
+          } else {
+            // Profile already exists - update studentId if needed
+            if (existingProfile.studentId != studentId) {
+              await _firestoreService.updateUserProfile(user.uid, {
+                'studentId': studentId,
+              });
+            }
+            loginWarning = 'Login account already exists for this phone number';
+          }
           loginPhone = phone;
           loginPassword = password;
+        }
+      } on FirebaseAuthException catch (e) {
+        // Handle email-already-in-use - this means Auth account exists
+        if (e.code == 'email-already-in-use') {
+          // Check if there's an existing user profile linked to this student
+          final existingProfile = await _firestoreService.getUserProfileByStudentId(studentId);
+          
+          if (existingProfile == null) {
+            // No profile exists - this is an orphaned Auth account from a deleted student
+            // We can't update the password or get the UID from client SDK
+            // The student was added successfully, but login creation failed
+            // Solution: Implement Cloud Function (see docs/firebase-auth-cleanup-cloud-function.md)
+            // OR manually delete the Auth account from Firebase Console:
+            // Authentication → Users → Find by email (+447727377256@drivemate.local) → Delete
+            loginWarning = 'Student added successfully. A login account exists for this phone number from a previously deleted student. To create login with new password, delete the old Auth account from Firebase Console (Authentication → Users) or implement the Cloud Function.';
+          } else {
+            // Profile exists - account is already linked to this student
+            loginWarning = 'Student added successfully. Login account already exists for this phone number.';
+            loginPhone = phone;
+            loginPassword = password;
+          }
+        } else {
+          loginError = e.message ?? e.toString();
         }
       } catch (error) {
         loginError = error.toString();
@@ -1176,7 +1214,19 @@ class _StudentsScreenState extends State<StudentsScreen> {
       Navigator.pop(context);
     }
     if (context.mounted && loginPhone != null && loginPassword != null) {
-      _showLoginDetails(context, loginPhone, loginPassword);
+      if (loginWarning != null) {
+        // Show warning first, then login details
+        _showSnack(context, loginWarning, isError: false);
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (context.mounted) {
+            _showLoginDetails(context, loginPhone!, loginPassword!);
+          }
+        });
+      } else {
+        _showLoginDetails(context, loginPhone, loginPassword);
+      }
+    } else if (context.mounted && loginWarning != null) {
+      _showSnack(context, loginWarning, isError: false);
     } else if (context.mounted && loginError != null) {
       _showSnack(context, 'Student added, but login failed: $loginError');
     }
@@ -1477,6 +1527,13 @@ class _StudentsScreenState extends State<StudentsScreen> {
     if (confirm != true) return;
     try {
       await _firestoreService.deleteStudent(student.id);
+      if (context.mounted) {
+        _showSnack(
+          context,
+          'Student deleted successfully',
+          isError: false,
+        );
+      }
     } catch (error) {
       if (context.mounted) {
         _showSnack(context, 'Failed to delete student: $error');
@@ -1484,10 +1541,21 @@ class _StudentsScreenState extends State<StudentsScreen> {
     }
   }
 
-  void _showSnack(BuildContext context, String message) {
+  void _showSnack(BuildContext context, String message, {bool isError = true}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Row(
+          children: [
+            Icon(
+              isError ? Icons.error_outline : Icons.info_outline,
+              color: Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: isError ? AppTheme.error : AppTheme.info,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),

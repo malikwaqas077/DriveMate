@@ -412,6 +412,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       color: AppTheme.error,
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    color: AppTheme.error,
+                    onPressed: () => _confirmDelete(context, expense),
+                    tooltip: 'Delete expense',
+                  ),
                 ],
               ),
             ),
@@ -455,7 +462,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             const Expanded(child: Text('Delete expense?')),
           ],
         ),
-        content: Text('Delete "${expense.description}"?'),
+        content: Text('Delete "${expense.description}"? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -463,8 +470,39 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           ),
           FilledButton(
             onPressed: () async {
-              await _firestoreService.deleteExpense(expense.id);
-              if (context.mounted) Navigator.pop(context, true);
+              try {
+                await _firestoreService.deleteExpense(expense.id);
+                if (context.mounted) {
+                  Navigator.pop(context, true);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Row(
+                        children: [
+                          Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                          SizedBox(width: 12),
+                          Text('Expense deleted'),
+                        ],
+                      ),
+                      backgroundColor: AppTheme.success,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context, false);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error deleting expense: $e'),
+                      backgroundColor: AppTheme.error,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
             },
             style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
             child: const Text('Delete'),

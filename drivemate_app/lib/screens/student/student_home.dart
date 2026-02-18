@@ -10,6 +10,7 @@ import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_logo.dart';
 import '../chat/conversations_list_screen.dart';
+import '../instructor/student_competencies_screen.dart';
 import '../owner/announcements_screen.dart';
 import 'student_lessons_screen.dart';
 import 'student_profile_screen.dart';
@@ -44,6 +45,11 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver {
         icon: Icons.calendar_today_outlined,
         activeIcon: Icons.calendar_today_rounded,
         label: 'Lessons',
+      ),
+      _NavItem(
+        icon: Icons.bar_chart_outlined,
+        activeIcon: Icons.bar_chart_rounded,
+        label: 'Progress',
       ),
       _NavItem(
         icon: Icons.person_outline_rounded,
@@ -88,11 +94,23 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver {
 
   void _buildScreens() {
     final studentId = widget.profile.studentId;
+    final instructorId = _student?.instructorId;
     _screens = [
       StudentLessonsScreen(
         studentId: studentId,
-        instructorId: _student?.instructorId,
+        instructorId: instructorId,
       ),
+      // Progress screen - read-only view of competencies
+      if (studentId != null && instructorId != null)
+        StudentCompetenciesScreen(
+          studentId: studentId,
+          studentName: _student?.name ?? widget.profile.name,
+          instructorId: instructorId,
+          readOnly: true,
+          showAppBar: false,
+        )
+      else
+        const _NoProgressPlaceholder(),
       StudentProfileScreen(profile: widget.profile),
     ];
   }
@@ -547,4 +565,44 @@ class _NavItem {
   final IconData icon;
   final IconData activeIcon;
   final String label;
+}
+
+class _NoProgressPlaceholder extends StatelessWidget {
+  const _NoProgressPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.bar_chart_rounded,
+              size: 64,
+              color: colorScheme.onSurfaceVariant.withOpacity(0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Progress not available yet',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: colorScheme.onSurface,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your instructor will start tracking your driving skills once you begin lessons.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

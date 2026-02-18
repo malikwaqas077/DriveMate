@@ -374,8 +374,19 @@ class FirestoreService {
     return _students.doc(studentId).update(data);
   }
 
-  Future<void> deleteStudent(String studentId) {
-    return _students.doc(studentId).delete();
+  Future<void> deleteStudent(String studentId) async {
+    // Delete student document
+    await _students.doc(studentId).delete();
+    
+    // Also delete the associated user profile if it exists
+    // Note: If the student had a login account, the Firebase Auth account will remain
+    // but won't be accessible since the user profile is deleted. To fully delete the
+    // Auth account, you need to use Firebase Admin SDK via Cloud Functions.
+    final userProfile = await getUserProfileByStudentId(studentId);
+    if (userProfile != null) {
+      // Delete user profile from Firestore
+      await _users.doc(userProfile.id).delete();
+    }
   }
 
   Future<void> addPayment({
@@ -442,11 +453,14 @@ class FirestoreService {
     final studentRef = _students.doc(studentId);
     return _db.runTransaction((tx) async {
       final snap = await tx.get(studentRef);
-      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
       tx.set(lessonRef, lesson.toMap());
-      tx.update(studentRef, {
-        'balanceHours': current - lesson.durationHours,
-      });
+      // Only adjust balance if the student still exists
+      if (snap.exists) {
+        final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
+        tx.update(studentRef, {
+          'balanceHours': current - lesson.durationHours,
+        });
+      }
     });
   }
 
@@ -459,14 +473,15 @@ class FirestoreService {
     final durationDelta = lesson.durationHours - previousDuration;
     return _db.runTransaction((tx) async {
       final snap = await tx.get(studentRef);
-      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
       tx.update(lessonRef, {
         'startAt': Timestamp.fromDate(lesson.startAt),
         'durationHours': lesson.durationHours,
         'notes': lesson.notes,
         'updatedAt': FieldValue.serverTimestamp(),
       });
-      if (durationDelta != 0) {
+      // Only adjust balance if the student still exists and duration changed
+      if (durationDelta != 0 && snap.exists) {
+        final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
         tx.update(studentRef, {
           'balanceHours': current - durationDelta,
         });
@@ -479,11 +494,14 @@ class FirestoreService {
     final studentRef = _students.doc(lesson.studentId);
     return _db.runTransaction((tx) async {
       final snap = await tx.get(studentRef);
-      final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
       tx.delete(lessonRef);
-      tx.update(studentRef, {
-        'balanceHours': current + lesson.durationHours,
-      });
+      // Only restore balance if the student still exists
+      if (snap.exists) {
+        final current = (snap.data()?['balanceHours'] ?? 0).toDouble();
+        tx.update(studentRef, {
+          'balanceHours': current + lesson.durationHours,
+        });
+      }
     });
   }
 
@@ -676,6 +694,17 @@ class FirestoreService {
   }) {
     return _lessons.doc(lessonId).update({
       'status': status,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Update test result for a lesson
+  Future<void> updateLessonTestResult({
+    required String lessonId,
+    required String? testResult,
+  }) {
+    return _lessons.doc(lessonId).update({
+      'testResult': testResult,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

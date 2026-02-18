@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/lesson.dart';
 import '../../models/payment.dart';
+import '../../models/recurring_template.dart';
 import '../../models/student.dart';
 import '../../models/user_profile.dart';
 import '../../services/chat_service.dart';
@@ -173,7 +174,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
           _cachedLessons[i].startAt != newLessons[i].startAt ||
           _cachedLessons[i].durationHours != newLessons[i].durationHours ||
           _cachedLessons[i].studentId != newLessons[i].studentId ||
-          _cachedLessons[i].status != newLessons[i].status) {
+          _cachedLessons[i].status != newLessons[i].status ||
+          _cachedLessons[i].testResult != newLessons[i].testResult) {
         return true;
       }
     }
@@ -901,6 +903,26 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   ],
                 ),
               ),
+              // Test result badge (pass/fail)
+              if ((lesson.lessonType == 'test' || lesson.lessonType == 'mock_test') && lesson.testResult != null)
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Container(
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: lesson.testResult == 'pass' ? Colors.green : Colors.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                    child: Icon(
+                      lesson.testResult == 'pass' ? Icons.check : Icons.close,
+                      size: 10,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               // Bug 1.5: "NEXT" badge on upcoming lesson
               if (isNextUpcoming)
                 Positioned(
@@ -1350,6 +1372,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Lesson created for $studentName'),
+        duration: const Duration(seconds: 4),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         action: SnackBarAction(
@@ -1536,6 +1559,35 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       );
                     },
                   ),
+                  if (lesson.lessonType == 'test' || lesson.lessonType == 'mock_test')
+                    ListTile(
+                      leading: Icon(
+                        lesson.testResult == 'pass'
+                            ? Icons.check_circle_rounded
+                            : lesson.testResult == 'fail'
+                                ? Icons.cancel_rounded
+                                : Icons.grading_rounded,
+                        color: lesson.testResult == 'pass'
+                            ? AppTheme.success
+                            : lesson.testResult == 'fail'
+                                ? AppTheme.error
+                                : AppTheme.info,
+                      ),
+                      title: Text(
+                        lesson.testResult == 'pass'
+                            ? 'Result: Pass'
+                            : lesson.testResult == 'fail'
+                                ? 'Result: Fail'
+                                : 'Mark Pass / Fail',
+                      ),
+                      subtitle: lesson.testResult != null
+                          ? const Text('Tap to change result')
+                          : null,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showTestResultDialog(parentContext, lesson);
+                      },
+                    ),
                   if (lesson.status == 'scheduled')
                     ListTile(
                       leading: Icon(Icons.cancel_outlined, color: Colors.orange.shade700),
@@ -1635,6 +1687,82 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Error cancelling lesson: $e'),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _showTestResultDialog(BuildContext context, Lesson lesson) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppTheme.infoLight,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.grading_rounded, color: AppTheme.info, size: 22),
+            ),
+            const SizedBox(width: 16),
+            const Expanded(child: Text('Test Result')),
+          ],
+        ),
+        content: const Text('How did the student do?'),
+        actions: [
+          if (lesson.testResult != null)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'clear'),
+              child: const Text('Clear Result'),
+            ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'fail'),
+            icon: const Icon(Icons.cancel_rounded),
+            label: const Text('Fail'),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'pass'),
+            icon: const Icon(Icons.check_circle_rounded),
+            label: const Text('Pass'),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.success),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && mounted) {
+      try {
+        await _firestoreService.updateLessonTestResult(
+          lessonId: lesson.id,
+          testResult: result == 'clear' ? null : result,
+        );
+        if (mounted) {
+          final message = result == 'clear'
+              ? 'Test result cleared'
+              : result == 'pass'
+                  ? 'Marked as PASS'
+                  : 'Marked as FAIL';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error updating test result: $e'),
               backgroundColor: AppTheme.error,
             ),
           );
@@ -2124,6 +2252,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return result;
   }
 
+  static const _dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
   Future<void> _showAddLesson(
     BuildContext context,
     List<Student> students,
@@ -2134,7 +2264,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       _showSnack(context, 'Add a student first before adding a lesson.');
       return;
     }
-    Student? selectedStudent; // Start with no student selected
+    Student? selectedStudent;
     final durationController = TextEditingController(text: '1');
     String lessonType = 'lesson';
     DateTime lessonDate = initialStart ?? selectedDay;
@@ -2145,6 +2275,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
       widget.instructor.instructorSettings?.customLessonTypes ?? [],
     );
 
+    // Recurrence state
+    bool isRecurring = false;
+    int repeatWeeks = 4;
+    bool isSaving = false;
+
     await showDialog<void>(
       context: context,
       builder: (context) {
@@ -2152,12 +2287,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
           builder: (context, setDialogState) {
             final dialogWidth =
                 MediaQuery.sizeOf(context).width.clamp(320.0, 520.0);
+            final colorScheme = Theme.of(context).colorScheme;
             return AlertDialog(
               title: const Text('Add lesson'),
               content: SizedBox(
                 width: dialogWidth,
                 child: SingleChildScrollView(
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Autocomplete<Student>(
                         displayStringForOption: (student) => student.name,
@@ -2253,17 +2390,140 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      // Repeat toggle
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Row(
+                          children: [
+                            Icon(
+                              Icons.repeat_rounded,
+                              size: 20,
+                              color: isRecurring
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Repeat weekly',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: isRecurring
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurface,
+                              ),
+                            ),
+                          ],
+                        ),
+                        value: isRecurring,
+                        onChanged: (v) => setDialogState(() => isRecurring = v),
+                      ),
+                      if (isRecurring) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Every ${_dayNames[lessonDate.weekday - 1]} at ${DateFormat('HH:mm').format(DateTime(0, 0, 0, time.hour, time.minute))}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Text(
+                              'For',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              onPressed: repeatWeeks > 2
+                                  ? () => setDialogState(() => repeatWeeks--)
+                                  : null,
+                              icon: const Icon(Icons.remove_circle_outline),
+                              iconSize: 22,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: colorScheme.outlineVariant,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '$repeatWeeks',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16,
+                                  color: colorScheme.onSurface,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: repeatWeeks < 52
+                                  ? () => setDialogState(() => repeatWeeks++)
+                                  : null,
+                              icon: const Icon(Icons.add_circle_outline),
+                              iconSize: 22,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            Text(
+                              'weeks',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: colorScheme.primaryContainer.withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.info_outline_rounded,
+                                size: 16,
+                                color: colorScheme.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '$repeatWeeks lessons will be created starting ${DateFormat('d MMM').format(lessonDate)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: isSaving ? null : () => Navigator.pop(context),
                   child: const Text('Cancel'),
                 ),
                 FilledButton(
-                  onPressed: selectedStudent == null
+                  onPressed: selectedStudent == null || isSaving
                       ? null
                       : () async {
                           try {
@@ -2277,6 +2537,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               );
                               return;
                             }
+                            setDialogState(() => isSaving = true);
                             final startAt = DateTime(
                               lessonDate.year,
                               lessonDate.month,
@@ -2284,43 +2545,88 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               time.hour,
                               time.minute,
                             );
-                            final lesson = Lesson(
-                              id: '',
-                              instructorId: widget.instructor.id,
-                              studentId: selectedStudent!.id,
-                              schoolId: widget.instructor.schoolId,
-                              startAt: startAt,
-                              durationHours: duration,
-                              lessonType: lessonType,
-                              notes: null,
-                            );
-                            await _firestoreService.addLesson(
-                              lesson: lesson,
-                              studentId: selectedStudent!.id,
-                            );
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                              // Navigate to the week containing the lesson if it's not the current week
-                              final lessonWeekStart = _startOfWeek(startAt);
-                              final currentWeekStart = _startOfWeek(_focusedDay);
-                              if (!_isSameDay(lessonWeekStart, currentWeekStart)) {
+
+                            if (isRecurring) {
+                              // Create recurring lessons
+                              final template = RecurringTemplate(
+                                id: '',
+                                instructorId: widget.instructor.id,
+                                studentId: selectedStudent!.id,
+                                dayOfWeek: lessonDate.weekday,
+                                startHour: time.hour,
+                                startMinute: time.minute,
+                                durationHours: duration,
+                                lessonType: lessonType,
+                                weeks: repeatWeeks,
+                              );
+                              final count = await _firestoreService
+                                  .generateLessonsFromTemplate(
+                                template: template,
+                                startFromDate: lessonDate,
+                              );
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      '$count lessons created for ${selectedStudent!.name}',
+                                    ),
+                                    backgroundColor: AppTheme.success,
+                                    behavior: SnackBarBehavior.floating,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                );
+                              }
+                              if (mounted) {
                                 setState(() {
                                   _focusedDay = startAt;
                                   _selectedDay = startAt;
                                   _didAutoScroll = false;
                                 });
                               }
-                            }
-                            // Offer to share lesson with student
-                            if (mounted) {
-                              _offerShareLessonWithStudent(
-                                lesson,
-                                selectedStudent!.name,
+                            } else {
+                              // Create single lesson
+                              final lesson = Lesson(
+                                id: '',
+                                instructorId: widget.instructor.id,
+                                studentId: selectedStudent!.id,
+                                schoolId: widget.instructor.schoolId,
+                                startAt: startAt,
+                                durationHours: duration,
+                                lessonType: lessonType,
+                                notes: null,
                               );
+                              await _firestoreService.addLesson(
+                                lesson: lesson,
+                                studentId: selectedStudent!.id,
+                              );
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                final lessonWeekStart = _startOfWeek(startAt);
+                                final currentWeekStart =
+                                    _startOfWeek(_focusedDay);
+                                if (!_isSameDay(
+                                    lessonWeekStart, currentWeekStart)) {
+                                  setState(() {
+                                    _focusedDay = startAt;
+                                    _selectedDay = startAt;
+                                    _didAutoScroll = false;
+                                  });
+                                }
+                              }
+                              if (mounted) {
+                                _offerShareLessonWithStudent(
+                                  lesson,
+                                  selectedStudent!.name,
+                                );
+                              }
                             }
                           } catch (e) {
                             debugPrint('[calendar] Error adding lesson: $e');
                             if (context.mounted) {
+                              setDialogState(() => isSaving = false);
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text('Failed to add lesson: $e'),
@@ -2330,7 +2636,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             }
                           }
                         },
-                  child: const Text('Save'),
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(isRecurring
+                          ? 'Create $repeatWeeks Lessons'
+                          : 'Save'),
                 ),
               ],
             );

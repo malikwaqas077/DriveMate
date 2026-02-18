@@ -1,0 +1,413 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get user role (returns null if user doesn't exist)
+    function getUserRole() {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return userDoc != null ? userDoc.data.role : null;
+    }
+    
+    // Helper function to check if user is instructor or owner
+    function isInstructorOrOwner() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             (getUserRole() == 'instructor' || getUserRole() == 'owner');
+    }
+    
+    // Helper function to check if user is owner
+    function isOwnerRole() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             getUserRole() == 'owner';
+    }
+    
+    // Helper function to check if user is instructor
+    function isInstructorRole() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             getUserRole() == 'instructor';
+    }
+    
+    // Helper function to check if user is student
+    function isStudentRole() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             getUserRole() == 'student';
+    }
+    
+    // ==================== USERS COLLECTION ====================
+    match /users/{userId} {
+      // Allow users to read their own profile
+      // Allow instructors/owners to read profiles (for managing students/instructors)
+      // Allow queries by studentId for students to find their own profile
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isInstructorOrOwner() ||
+        (isStudentRole() && resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Allow users to create their own profile (critical for Google/Apple sign-in)
+      // Allow instructors/owners to create profiles for students/instructors they're creating
+      allow create: if isAuthenticated() && (
+        (request.auth.uid == userId &&
+         request.resource.data.keys().hasAll(['role', 'name', 'email']) &&
+         request.resource.data.role is string &&
+         request.resource.data.name is string &&
+         request.resource.data.email is string) ||
+        // Instructors can create student profiles
+        (isInstructorRole() && 
+         request.resource.data.role == 'student' &&
+         request.resource.data.keys().hasAll(['role', 'name', 'studentId']) &&
+         request.resource.data.studentId is string) ||
+        // Owners can create instructor profiles
+        (isOwnerRole() && 
+         request.resource.data.role == 'instructor' &&
+         request.resource.data.keys().hasAll(['role', 'name', 'email', 'schoolId']) &&
+         request.resource.data.schoolId is string)
+      );
+      
+      // Allow users to update their own profile
+      // Allow instructors/owners to update profiles they manage
+      // Allow students to update their own profile (for accepting terms, etc.)
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (isInstructorOrOwner() && resource.data.role == 'student' && request.resource.data.studentId == resource.data.studentId) ||
+        (isOwnerRole() && resource.data.role == 'instructor' && resource.data.schoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId) ||
+        (isStudentRole() && request.auth.uid == userId && 
+         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acceptedTermsVersion', 'acceptedTermsAt', 'fcmToken'])))
+      );
+      
+      // Allow instructors/owners to delete user profiles for students/instructors they manage
+      allow delete: if isAuthenticated() && (
+        // Instructors can delete student profiles they created
+        (isInstructorRole() && resource.data.role == 'student' && resource.data.studentId is string) ||
+        // Owners can delete instructor profiles in their school
+        (isOwnerRole() && resource.data.role == 'instructor' && resource.data.schoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId)
+      );
+    }
+    
+    // ==================== SCHOOLS COLLECTION ====================
+    match /schools/{schoolId} {
+      // Allow authenticated users to read schools
+      allow read: if isAuthenticated();
+      
+      // Allow users to create schools they own
+      allow create: if isAuthenticated() && 
+                       request.resource.data.ownerId == request.auth.uid &&
+                       request.resource.data.keys().hasAll(['ownerId', 'name']) &&
+                       request.resource.data.name is string;
+      
+      // Allow owners to update their own schools
+      allow update: if isAuthenticated() && 
+                       resource.data.ownerId == request.auth.uid;
+      
+      // Allow owners to delete their own schools
+      allow delete: if isAuthenticated() && 
+                       resource.data.ownerId == request.auth.uid;
+    }
+    
+    // ==================== SCHOOL_INSTRUCTORS COLLECTION ====================
+    match /school_instructors/{docId} {
+      // Allow authenticated users to read school instructor links
+      allow read: if isAuthenticated();
+      
+      // Allow instructors/owners to create links
+      allow create: if isAuthenticated() && isInstructorOrOwner();
+      
+      // Allow instructors/owners to update links
+      allow update: if isAuthenticated() && isInstructorOrOwner();
+      
+      // Allow instructors/owners to delete links
+      allow delete: if isAuthenticated() && isInstructorOrOwner();
+    }
+    
+    // ==================== STUDENTS COLLECTION ====================
+    match /students/{studentId} {
+      // Allow instructors/owners to read students
+      // Allow students to read their own record (by studentId link in user profile)
+      allow read: if isAuthenticated() && (
+        isInstructorOrOwner() ||
+        (isStudentRole() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId == studentId)
+      );
+      
+      // Allow instructors/owners to create students
+      allow create: if isAuthenticated() && isInstructorOrOwner() &&
+                       request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to update students
+      // Allow students to update their own profile fields
+      allow update: if isAuthenticated() && (
+        (isInstructorOrOwner() && resource.data.instructorId == request.auth.uid) ||
+        (isStudentRole() && resource.data.instructorId == request.auth.uid)
+      );
+      
+      // Allow instructors/owners to delete students
+      allow delete: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+    }
+    
+    // ==================== LESSONS COLLECTION ====================
+    match /lessons/{lessonId} {
+      // Allow instructors/owners to read lessons
+      // Allow students to read their own lessons
+      allow read: if isAuthenticated() && (
+        isInstructorOrOwner() ||
+        (isStudentRole() && resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Allow instructors/owners to create lessons
+      allow create: if isAuthenticated() && isInstructorOrOwner() &&
+                       request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to update lessons
+      allow update: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to delete lessons
+      allow delete: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+    }
+    
+    // ==================== PAYMENTS COLLECTION ====================
+    match /payments/{paymentId} {
+      // Allow instructors/owners to read payments
+      // Allow students to read their own payments
+      allow read: if isAuthenticated() && (
+        isInstructorOrOwner() ||
+        (isStudentRole() && resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Allow instructors/owners to create payments
+      allow create: if isAuthenticated() && isInstructorOrOwner() &&
+                       request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to update payments
+      allow update: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to delete payments
+      allow delete: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+    }
+    
+    // ==================== ACCESS_REQUESTS COLLECTION ====================
+    match /access_requests/{requestId} {
+      // Allow instructors/owners to read access requests
+      allow read: if isAuthenticated() && isInstructorOrOwner();
+      
+      // Allow instructors to create access requests
+      allow create: if isAuthenticated() && isInstructorRole() &&
+                       request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow owners to update access requests for their schools
+      allow update: if isAuthenticated() && isOwnerRole() &&
+                       resource.data.ownerId == request.auth.uid;
+      
+      // Allow deletion (optional)
+      allow delete: if false;
+    }
+    
+    // ==================== CANCELLATION_REQUESTS COLLECTION ====================
+    match /cancellation_requests/{requestId} {
+      // Allow instructors/owners to read cancellation requests
+      // Allow students to read their own cancellation requests
+      allow read: if isAuthenticated() && (
+        isInstructorOrOwner() ||
+        (isStudentRole() && resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Allow students to create cancellation requests
+      allow create: if isAuthenticated() && isStudentRole() &&
+                       request.resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId;
+      
+      // Allow instructors/owners to update cancellation requests
+      allow update: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+      
+      // Allow deletion (optional)
+      allow delete: if false;
+    }
+    
+    // ==================== TERMS COLLECTION ====================
+    match /terms/{schoolId} {
+      // Allow authenticated users to read terms
+      allow read: if isAuthenticated();
+      
+      // Allow owners to create/update terms for their schools
+      // Allow instructors who own the school to create/update terms
+      allow create, update: if isAuthenticated() && (
+        // Owner can edit terms for their school
+        (isOwnerRole() && get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid) ||
+        // Instructor who owns the school can edit terms
+        (isInstructorRole() && get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerId == request.auth.uid)
+      );
+      
+      // Don't allow delete
+      allow delete: if false;
+    }
+    
+    // ==================== INSTRUCTOR_NOTIFICATIONS COLLECTION ====================
+    match /instructor_notifications/{notificationId} {
+      // Allow instructors to read their notifications
+      allow read: if isAuthenticated() && isInstructorRole() &&
+                     resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors to create notifications
+      allow create: if isAuthenticated() && isInstructorRole() &&
+                       request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow update (for status changes)
+      allow update: if isAuthenticated() && isInstructorRole() &&
+                       resource.data.instructorId == request.auth.uid;
+      
+      // Allow deletion
+      allow delete: if isAuthenticated() && isInstructorRole() &&
+                       resource.data.instructorId == request.auth.uid;
+    }
+    
+    // ==================== RECURRING_TEMPLATES COLLECTION ====================
+    match /recurring_templates/{templateId} {
+      // Allow instructors/owners to read templates
+      allow read: if isAuthenticated() && isInstructorOrOwner() &&
+                     resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to create templates
+      allow create: if isAuthenticated() && isInstructorOrOwner() &&
+                       request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to update templates
+      allow update: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to delete templates
+      allow delete: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+    }
+    
+    // ==================== STUDENT_COMPETENCIES COLLECTION ====================
+    match /student_competencies/{competencyId} {
+      // Allow instructors/owners to read competencies
+      // Allow students to read their own competencies
+      allow read: if isAuthenticated() && (
+        isInstructorOrOwner() ||
+        (isStudentRole() && resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Allow instructors/owners to create/update competencies
+      allow write: if isAuthenticated() && isInstructorOrOwner() &&
+                      request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow deletion
+      allow delete: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+    }
+    
+    // ==================== STUDENT_ACHIEVEMENTS COLLECTION ====================
+    match /student_achievements/{achievementId} {
+      // Allow instructors/owners to read achievements
+      // Allow students to read their own achievements
+      allow read: if isAuthenticated() && (
+        isInstructorOrOwner() ||
+        (isStudentRole() && resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Allow instructors/owners to create achievements
+      allow create: if isAuthenticated() && isInstructorOrOwner() &&
+                       request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow update (optional)
+      allow update: if false;
+      
+      // Allow deletion (optional)
+      allow delete: if false;
+    }
+    
+    // ==================== SCHOOL_ANNOUNCEMENTS COLLECTION ====================
+    match /school_announcements/{announcementId} {
+      // Allow authenticated users to read announcements for their school
+      allow read: if isAuthenticated();
+      
+      // Allow owners and instructors to create announcements for their school
+      // Check: user must be owner of the school OR instructor with schoolId matching their profile
+      allow create: if isAuthenticated() && isInstructorOrOwner() &&
+                       request.resource.data.schoolId is string &&
+                       request.resource.data.authorId == request.auth.uid &&
+                       (get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)).data.ownerId == request.auth.uid ||
+                        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == request.resource.data.schoolId);
+      
+      // Allow owners and instructors to update/delete their own announcements
+      allow update, delete: if isAuthenticated() && isInstructorOrOwner() &&
+                               resource.data.schoolId is string &&
+                               resource.data.authorId == request.auth.uid &&
+                               (get(/databases/$(database)/documents/schools/$(resource.data.schoolId)).data.ownerId == request.auth.uid ||
+                                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == resource.data.schoolId);
+    }
+    
+    // ==================== EXPENSES COLLECTION ====================
+    match /expenses/{expenseId} {
+      // Allow instructors/owners to read expenses
+      allow read: if isAuthenticated() && isInstructorOrOwner();
+      
+      // Allow instructors/owners to create expenses
+      allow create: if isAuthenticated() && isInstructorOrOwner() &&
+                       request.resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to update expenses
+      allow update: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+      
+      // Allow instructors/owners to delete expenses
+      allow delete: if isAuthenticated() && isInstructorOrOwner() &&
+                       resource.data.instructorId == request.auth.uid;
+    }
+    
+    // ==================== CONVERSATIONS COLLECTION (Chat) ====================
+    match /conversations/{conversationId} {
+      // Allow instructors and students to read their conversations
+      allow read: if isAuthenticated() && (
+        (isInstructorRole() && resource.data.instructorId == request.auth.uid) ||
+        (isStudentRole() && resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Allow instructors and students to create conversations
+      allow create: if isAuthenticated() && (
+        (isInstructorRole() && request.resource.data.instructorId == request.auth.uid) ||
+        (isStudentRole() && request.resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Allow update
+      allow update: if isAuthenticated() && (
+        (isInstructorRole() && resource.data.instructorId == request.auth.uid) ||
+        (isStudentRole() && resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+      );
+      
+      // Messages subcollection
+      match /messages/{messageId} {
+        // Allow read if user is part of the conversation
+        allow read: if isAuthenticated() && (
+          (isInstructorRole() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.instructorId == request.auth.uid) ||
+          (isStudentRole() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+        );
+        
+        // Allow create if user is part of the conversation
+        allow create: if isAuthenticated() && (
+          (isInstructorRole() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.instructorId == request.auth.uid) ||
+          (isStudentRole() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+        );
+        
+        // Allow update (for read status)
+        allow update: if isAuthenticated() && (
+          (isInstructorRole() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.instructorId == request.auth.uid) ||
+          (isStudentRole() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId)
+        );
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import 'dart:typed_data' show Uint8List;
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -148,7 +149,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
           'category': _category,
           'description': _descriptionController.text.trim(),
           'amount': amount,
-          'date': _date,
+          'date': Timestamp.fromDate(_date),
           'paymentMethod': _paymentMethod,
           if (_receiptLocalPath != null) 'receiptLocalPath': _receiptLocalPath,
           if (notes.isNotEmpty) 'notes': notes,
