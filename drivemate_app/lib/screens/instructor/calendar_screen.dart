@@ -1363,16 +1363,36 @@ class _CalendarScreenState extends State<CalendarScreen> {
     }
   }
 
+  void _showTimedSnackBar(String message, {Color? backgroundColor}) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    final controller = messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 3),
+        backgroundColor: backgroundColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+    Future.delayed(const Duration(seconds: 3), () {
+      controller.close();
+    });
+  }
+
   void _offerShareLessonWithStudent(
     Lesson lesson,
     String studentName,
   ) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    final controller = messenger.showSnackBar(
       SnackBar(
         content: Text('Lesson created for $studentName'),
-        duration: const Duration(seconds: 4),
+        duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         action: SnackBarAction(
@@ -1381,6 +1401,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
         ),
       ),
     );
+    // Ensure the snackbar is dismissed even if widget rebuilds interfere
+    Future.delayed(const Duration(seconds: 3), () {
+      controller.close();
+    });
   }
 
   Future<void> _shareLessonDetails(Lesson lesson) async {
@@ -2277,7 +2301,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     // Recurrence state
     bool isRecurring = false;
-    int repeatWeeks = 4;
+    int repeatCount = 4;
+    String frequency = 'weekly';
     bool isSaving = false;
 
     await showDialog<void>(
@@ -2407,7 +2432,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              'Repeat weekly',
+                              'Repeat',
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 color: isRecurring
@@ -2422,18 +2447,48 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       ),
                       if (isRecurring) ...[
                         const SizedBox(height: 8),
-                        Text(
-                          'Every ${_dayNames[lessonDate.weekday - 1]} at ${DateFormat('HH:mm').format(DateTime(0, 0, 0, time.hour, time.minute))}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: colorScheme.onSurfaceVariant,
+                        // Frequency selector
+                        DropdownButtonFormField<String>(
+                          value: frequency,
+                          decoration: InputDecoration(
+                            labelText: 'Frequency',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                           ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'daily',
+                              child: Text('Daily'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'everyOtherDay',
+                              child: Text('Every other day'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'weekly',
+                              child: Text('Weekly'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'biweekly',
+                              child: Text('Every 2 weeks'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) {
+                              setDialogState(() => frequency = v);
+                            }
+                          },
                         ),
                         const SizedBox(height: 12),
                         Row(
                           children: [
                             Text(
-                              'For',
+                              'Repeat',
                               style: TextStyle(
                                 fontWeight: FontWeight.w500,
                                 color: colorScheme.onSurface,
@@ -2441,8 +2496,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             ),
                             const SizedBox(width: 8),
                             IconButton(
-                              onPressed: repeatWeeks > 2
-                                  ? () => setDialogState(() => repeatWeeks--)
+                              onPressed: repeatCount > 2
+                                  ? () => setDialogState(() => repeatCount--)
                                   : null,
                               icon: const Icon(Icons.remove_circle_outline),
                               iconSize: 22,
@@ -2460,7 +2515,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                '$repeatWeeks',
+                                '$repeatCount',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 16,
@@ -2469,15 +2524,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               ),
                             ),
                             IconButton(
-                              onPressed: repeatWeeks < 52
-                                  ? () => setDialogState(() => repeatWeeks++)
+                              onPressed: repeatCount < 52
+                                  ? () => setDialogState(() => repeatCount++)
                                   : null,
                               icon: const Icon(Icons.add_circle_outline),
                               iconSize: 22,
                               visualDensity: VisualDensity.compact,
                             ),
                             Text(
-                              'weeks',
+                              'times',
                               style: TextStyle(
                                 fontWeight: FontWeight.w500,
                                 color: colorScheme.onSurface,
@@ -2502,7 +2557,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  '$repeatWeeks lessons will be created starting ${DateFormat('d MMM').format(lessonDate)}',
+                                  '$repeatCount lessons will be created starting ${DateFormat('d MMM').format(lessonDate)}',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: colorScheme.primary,
@@ -2557,7 +2612,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 startMinute: time.minute,
                                 durationHours: duration,
                                 lessonType: lessonType,
-                                weeks: repeatWeeks,
+                                repeatCount: repeatCount,
+                                frequency: frequency,
                               );
                               final count = await _firestoreService
                                   .generateLessonsFromTemplate(
@@ -2566,18 +2622,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               );
                               if (context.mounted) {
                                 Navigator.pop(context);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      '$count lessons created for ${selectedStudent!.name}',
-                                    ),
-                                    backgroundColor: AppTheme.success,
-                                    behavior: SnackBarBehavior.floating,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                );
                               }
                               if (mounted) {
                                 setState(() {
@@ -2585,6 +2629,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                   _selectedDay = startAt;
                                   _didAutoScroll = false;
                                 });
+                                _showTimedSnackBar(
+                                  '$count lessons created for ${selectedStudent!.name}',
+                                  backgroundColor: AppTheme.success,
+                                );
                               }
                             } else {
                               // Create single lesson
@@ -2604,6 +2652,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               );
                               if (context.mounted) {
                                 Navigator.pop(context);
+                              }
+                              if (mounted) {
                                 final lessonWeekStart = _startOfWeek(startAt);
                                 final currentWeekStart =
                                     _startOfWeek(_focusedDay);
@@ -2615,8 +2665,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                     _didAutoScroll = false;
                                   });
                                 }
-                              }
-                              if (mounted) {
                                 _offerShareLessonWithStudent(
                                   lesson,
                                   selectedStudent!.name,
@@ -2646,7 +2694,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           ),
                         )
                       : Text(isRecurring
-                          ? 'Create $repeatWeeks Lessons'
+                          ? 'Create $repeatCount Lessons'
                           : 'Save'),
                 ),
               ],

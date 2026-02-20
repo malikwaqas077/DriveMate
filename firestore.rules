@@ -167,8 +167,13 @@ service cloud.firestore {
                        request.resource.data.instructorId == request.auth.uid;
       
       // Allow instructors/owners to update lessons
-      allow update: if isAuthenticated() && isInstructorOrOwner() &&
-                       resource.data.instructorId == request.auth.uid;
+      // Allow students to update only studentReflection on their own lessons
+      allow update: if isAuthenticated() && (
+        (isInstructorOrOwner() && resource.data.instructorId == request.auth.uid) ||
+        (isStudentRole() &&
+         resource.data.studentId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.studentId &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentReflection', 'updatedAt']))
+      );
       
       // Allow instructors/owners to delete lessons
       allow delete: if isAuthenticated() && isInstructorOrOwner() &&

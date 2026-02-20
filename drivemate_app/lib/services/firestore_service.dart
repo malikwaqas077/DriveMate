@@ -769,15 +769,19 @@ class FirestoreService {
   }) async {
     final batch = _db.batch();
     int count = 0;
+    final daysBetween = template.daysBetween;
 
-    // Find the first occurrence of the desired dayOfWeek on or after startFromDate
+    // For weekly/biweekly: find the first occurrence of the desired dayOfWeek
+    // For daily/everyOtherDay: start from the given date directly
     var current = startFromDate;
-    while (current.weekday != template.dayOfWeek) {
-      current = current.add(const Duration(days: 1));
+    if (daysBetween >= 7) {
+      while (current.weekday != template.dayOfWeek) {
+        current = current.add(const Duration(days: 1));
+      }
     }
 
-    for (int week = 0; week < template.weeks; week++) {
-      final lessonDate = current.add(Duration(days: week * 7));
+    for (int i = 0; i < template.repeatCount; i++) {
+      final lessonDate = current.add(Duration(days: i * daysBetween));
       final startAt = DateTime(
         lessonDate.year,
         lessonDate.month,

@@ -251,7 +251,7 @@ class _RecurringLessonScreenState extends State<RecurringLessonScreen> {
                           ),
                           title: Text('$studentName - ${_dayNames[t.dayOfWeek - 1]}'),
                           subtitle: Text(
-                            '${t.startHour.toString().padLeft(2, '0')}:${t.startMinute.toString().padLeft(2, '0')} - ${t.durationHours}h - ${t.weeks} weeks',
+                            '${t.startHour.toString().padLeft(2, '0')}:${t.startMinute.toString().padLeft(2, '0')} - ${t.durationHours}h - ${t.repeatCount}x ${t.frequencyLabel}',
                           ),
                           trailing: IconButton(
                             icon: const Icon(Icons.delete_outline, color: AppTheme.error),
@@ -290,7 +290,7 @@ class _RecurringLessonScreenState extends State<RecurringLessonScreen> {
         startMinute: _startTime.minute,
         durationHours: _durationHours,
         lessonType: _lessonType,
-        weeks: _weeks,
+        repeatCount: _weeks,
       );
 
       // Save template

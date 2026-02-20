@@ -604,6 +604,82 @@ export const onMessageCreated = functions.firestore
   });
 
 /**
+ * Triggered when a student competency is created or updated
+ * Sends push notification to the student about their progress update
+ */
+export const onCompetencyUpdated = functions.firestore
+  .document("student_competencies/{competencyId}")
+  .onWrite(async (change, context) => {
+    // Skip deletes
+    if (!change.after.exists) return;
+
+    const competency = change.after.data()!;
+    const studentId = competency.studentId;
+    const instructorId = competency.instructorId;
+    const skill = competency.skill || "a skill";
+    const rating = competency.rating || 0;
+
+    if (!studentId || !instructorId) {
+      functions.logger.warn("Competency updated without studentId or instructorId");
+      return;
+    }
+
+    // For updates, only notify if rating or notes actually changed
+    if (change.before.exists) {
+      const before = change.before.data()!;
+      if (before.rating === competency.rating && before.notes === competency.notes) {
+        return; // No meaningful change
+      }
+    }
+
+    // Get the user profile linked to this student
+    const userQuery = await db
+      .collection("users")
+      .where("studentId", "==", studentId)
+      .limit(1)
+      .get();
+
+    if (userQuery.empty) {
+      functions.logger.info(`No user found for student ${studentId}`);
+      return;
+    }
+
+    const userDoc = userQuery.docs[0];
+    const fcmToken = userDoc.data().fcmToken;
+
+    if (!fcmToken) {
+      functions.logger.info(`No FCM token for student user ${userDoc.id}`);
+      return;
+    }
+
+    const instructorName = await getInstructorName(instructorId);
+
+    // Rating labels matching the Flutter app
+    const ratingLabels = [
+      "Not started", "Introduced", "Directed",
+      "Prompted", "Rarely prompted", "Independent",
+    ];
+    const ratingLabel = rating >= 0 && rating < ratingLabels.length
+      ? ratingLabels[rating]
+      : "Updated";
+
+    await sendPushNotification(
+      fcmToken,
+      "Progress Updated",
+      `${instructorName} updated "${skill}" to ${ratingLabel}`,
+      {
+        type: "competency_updated",
+        competencyId: context.params.competencyId,
+        studentId: studentId,
+      }
+    );
+
+    functions.logger.info(
+      `Sent progress notification to student ${studentId} for skill "${skill}"`
+    );
+  });
+
+/**
  * Triggered when a new announcement is created
  * Sends push notification to all users in the school matching the audience
  */

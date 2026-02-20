@@ -1,4 +1,4 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class RecurringTemplate {
   RecurringTemplate({
@@ -10,7 +10,8 @@ class RecurringTemplate {
     required this.startMinute,
     required this.durationHours,
     this.lessonType = 'lesson',
-    required this.weeks,
+    required this.repeatCount,
+    this.frequency = 'weekly',
     this.createdAt,
   });
 
@@ -22,8 +23,33 @@ class RecurringTemplate {
   final int startMinute;
   final double durationHours;
   final String lessonType;
-  final int weeks;
+  final int repeatCount; // Number of lessons to generate
+  final String frequency; // 'daily', 'everyOtherDay', 'weekly', 'biweekly'
   final DateTime? createdAt;
+
+  /// Number of days between each lesson for this frequency
+  int get daysBetween {
+    switch (frequency) {
+      case 'daily':
+        return 1;
+      case 'everyOtherDay':
+        return 2;
+      case 'biweekly':
+        return 14;
+      case 'weekly':
+      default:
+        return 7;
+    }
+  }
+
+  static const frequencyLabels = {
+    'daily': 'Daily',
+    'everyOtherDay': 'Every other day',
+    'weekly': 'Weekly',
+    'biweekly': 'Every 2 weeks',
+  };
+
+  String get frequencyLabel => frequencyLabels[frequency] ?? 'Weekly';
 
   Map<String, dynamic> toMap() {
     return {
@@ -34,13 +60,18 @@ class RecurringTemplate {
       'startMinute': startMinute,
       'durationHours': durationHours,
       'lessonType': lessonType,
-      'weeks': weeks,
+      'repeatCount': repeatCount,
+      'frequency': frequency,
       'createdAt': FieldValue.serverTimestamp(),
     };
   }
 
   static RecurringTemplate fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
+    // Support legacy 'weeks' field
+    final repeatCount = (data['repeatCount'] as int?) ??
+        (data['weeks'] as int?) ??
+        4;
     return RecurringTemplate(
       id: doc.id,
       instructorId: (data['instructorId'] ?? '') as String,
@@ -50,7 +81,8 @@ class RecurringTemplate {
       startMinute: (data['startMinute'] as int?) ?? 0,
       durationHours: _toDouble(data['durationHours']),
       lessonType: (data['lessonType'] ?? 'lesson') as String,
-      weeks: (data['weeks'] as int?) ?? 4,
+      repeatCount: repeatCount,
+      frequency: (data['frequency'] ?? 'weekly') as String,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
     );
   }

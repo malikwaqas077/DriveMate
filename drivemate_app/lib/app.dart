@@ -663,6 +663,12 @@ class StudentAccessGate extends StatelessWidget {
         if (schoolId.isEmpty) {
           return StudentHome(profile: profile);
         }
+        // Ensure student user profile has schoolId for notifications
+        if (profile.schoolId != schoolId) {
+          _firestoreService.updateUserProfile(profile.id, {
+            'schoolId': schoolId,
+          });
+        }
         return StreamBuilder<Terms?>(
           stream: _firestoreService.streamTermsForSchool(schoolId),
           builder: (context, termsSnapshot) {

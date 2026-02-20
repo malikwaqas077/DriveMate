@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onMessageCreated = exports.onInstructorNotificationCreated = exports.scheduleLessonReminders = exports.onCancellationRequestResponded = exports.onCancellationRequestCreated = exports.onReflectionAdded = exports.onLessonCreated = void 0;
+exports.onAnnouncementCreated = exports.onCompetencyUpdated = exports.onMessageCreated = exports.onInstructorNotificationCreated = exports.scheduleLessonReminders = exports.onCancellationRequestResponded = exports.onCancellationRequestCreated = exports.onReflectionAdded = exports.onLessonCreated = void 0;
 const admin = require("firebase-admin");
 const functions = require("firebase-functions");
 admin.initializeApp();
@@ -490,5 +490,120 @@ exports.onMessageCreated = functions.firestore
     }, true // isChatMessage = true for heads-up and actions
     );
     functions.logger.info(`Sent chat notification to ${recipientId} from ${senderId} in conversation ${conversationId}`);
+});
+/**
+ * Triggered when a student competency is created or updated
+ * Sends push notification to the student about their progress update
+ */
+exports.onCompetencyUpdated = functions.firestore
+    .document("student_competencies/{competencyId}")
+    .onWrite(async (change, context) => {
+    // Skip deletes
+    if (!change.after.exists)
+        return;
+    const competency = change.after.data();
+    const studentId = competency.studentId;
+    const instructorId = competency.instructorId;
+    const skill = competency.skill || "a skill";
+    const rating = competency.rating || 0;
+    if (!studentId || !instructorId) {
+        functions.logger.warn("Competency updated without studentId or instructorId");
+        return;
+    }
+    // For updates, only notify if rating or notes actually changed
+    if (change.before.exists) {
+        const before = change.before.data();
+        if (before.rating === competency.rating && before.notes === competency.notes) {
+            return; // No meaningful change
+        }
+    }
+    // Get the user profile linked to this student
+    const userQuery = await db
+        .collection("users")
+        .where("studentId", "==", studentId)
+        .limit(1)
+        .get();
+    if (userQuery.empty) {
+        functions.logger.info(`No user found for student ${studentId}`);
+        return;
+    }
+    const userDoc = userQuery.docs[0];
+    const fcmToken = userDoc.data().fcmToken;
+    if (!fcmToken) {
+        functions.logger.info(`No FCM token for student user ${userDoc.id}`);
+        return;
+    }
+    const instructorName = await getInstructorName(instructorId);
+    // Rating labels matching the Flutter app
+    const ratingLabels = [
+        "Not started", "Introduced", "Directed",
+        "Prompted", "Rarely prompted", "Independent",
+    ];
+    const ratingLabel = rating >= 0 && rating < ratingLabels.length
+        ? ratingLabels[rating]
+        : "Updated";
+    await sendPushNotification(fcmToken, "Progress Updated", `${instructorName} updated "${skill}" to ${ratingLabel}`, {
+        type: "competency_updated",
+        competencyId: context.params.competencyId,
+        studentId: studentId,
+    });
+    functions.logger.info(`Sent progress notification to student ${studentId} for skill "${skill}"`);
+});
+/**
+ * Triggered when a new announcement is created
+ * Sends push notification to all users in the school matching the audience
+ */
+exports.onAnnouncementCreated = functions.firestore
+    .document("school_announcements/{announcementId}")
+    .onCreate(async (snapshot, context) => {
+    const announcement = snapshot.data();
+    const schoolId = announcement.schoolId;
+    const audience = announcement.audience || "all"; // 'all', 'instructors', 'students'
+    const title = announcement.title || "New Announcement";
+    const body = announcement.body || "";
+    if (!schoolId) {
+        functions.logger.warn("Announcement created without schoolId");
+        return;
+    }
+    functions.logger.info(`New announcement "${title}" for school ${schoolId}, audience: ${audience}`);
+    // Query all users in this school
+    let usersQuery = db
+        .collection("users")
+        .where("schoolId", "==", schoolId);
+    const usersSnapshot = await usersQuery.get();
+    if (usersSnapshot.empty) {
+        functions.logger.info(`No users found for school ${schoolId}`);
+        return;
+    }
+    let sentCount = 0;
+    for (const userDoc of usersSnapshot.docs) {
+        const userData = userDoc.data();
+        const fcmToken = userData.fcmToken;
+        const userRole = userData.role;
+        // Skip users without FCM token
+        if (!fcmToken)
+            continue;
+        // Skip the author of the announcement
+        if (userDoc.id === announcement.authorId)
+            continue;
+        // Check audience filter
+        if (audience === "instructors" && userRole !== "instructor")
+            continue;
+        if (audience === "students" && userRole !== "student")
+            continue;
+        // Send notification
+        try {
+            await sendPushNotification(fcmToken, title, body.length > 150 ? body.substring(0, 150) + "..." : body, {
+                type: "announcement",
+                announcementId: context.params.announcementId,
+                schoolId: schoolId,
+            });
+            sentCount++;
+        }
+        catch (error) {
+            functions.logger.error(`Failed to send announcement to user ${userDoc.id}:`, error);
+        }
+    }
+    functions.logger.info(`Sent announcement "${title}" to ${sentCount} users in school ${schoolId}`);
 });
 //# sourceMappingURL=index.js.map

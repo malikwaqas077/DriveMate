@@ -155,7 +155,7 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Complete your profile with your information. This helps your instructor provide better service.',
+                              'Please fill in the required fields (*) so your instructor can provide the best service.',
                               style: TextStyle(
                                 fontSize: 13,
                                 color: AppTheme.primary,
@@ -174,7 +174,7 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
                         TextFormField(
                           controller: _nameController,
                           decoration: const InputDecoration(
-                            labelText: 'Full Name',
+                            labelText: 'Full Name *',
                             prefixIcon: Icon(Icons.person_outline),
                           ),
                           validator: (value) {
@@ -197,10 +197,16 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
                         TextFormField(
                           controller: _phoneController,
                           decoration: const InputDecoration(
-                            labelText: 'Phone Number',
+                            labelText: 'Phone Number *',
                             prefixIcon: Icon(Icons.phone_outlined),
                           ),
                           keyboardType: TextInputType.phone,
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Phone number is required';
+                            }
+                            return null;
+                          },
                         ),
                         const SizedBox(height: 16),
                         TextFormField(
@@ -220,11 +226,17 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
                         TextFormField(
                           controller: _addressController,
                           decoration: const InputDecoration(
-                            labelText: 'Address',
+                            labelText: 'Address *',
                             prefixIcon: Icon(Icons.home_outlined),
                             helperText: 'Your address helps your instructor navigate to you',
                           ),
                           maxLines: 3,
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Address is required';
+                            }
+                            return null;
+                          },
                         ),
                       ],
                     ),

@@ -30,6 +30,32 @@ class _StudentsScreenState extends State<StudentsScreen> {
   String _statusFilter = 'active';
   String _searchQuery = '';
 
+  // Cache streams to prevent StreamBuilder from resubscribing on every rebuild
+  late Stream<List<Student>> _allStudentsStream;
+  late Stream<List<Student>> _filteredStudentsStream;
+  late Stream<List<Payment>> _paymentsStream;
+  late Stream<List<Lesson>> _lessonsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _paymentsStream = _firestoreService.streamPaymentsForInstructor(widget.instructor.id);
+    _lessonsStream = _firestoreService.streamLessonsForInstructor(widget.instructor.id);
+    _allStudentsStream = _firestoreService.streamStudents(widget.instructor.id, status: null);
+    _filteredStudentsStream = _firestoreService.streamStudents(widget.instructor.id, status: _statusFilter);
+  }
+
+  void _updateStatusFilter(String newFilter) {
+    if (newFilter == _statusFilter) return;
+    setState(() {
+      _statusFilter = newFilter;
+      _filteredStudentsStream = _firestoreService.streamStudents(
+        widget.instructor.id,
+        status: newFilter == 'all' ? null : newFilter,
+      );
+    });
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -84,17 +110,11 @@ class _StudentsScreenState extends State<StudentsScreen> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<Student>>(
-      stream: _firestoreService.streamStudents(
-        widget.instructor.id,
-        status: null, // Get all students for counts
-      ),
+      stream: _allStudentsStream,
       builder: (context, allStudentsSnapshot) {
         // Get filtered students for display
         return StreamBuilder<List<Student>>(
-          stream: _firestoreService.streamStudents(
-            widget.instructor.id,
-            status: _statusFilter,
-          ),
+          stream: _filteredStudentsStream,
           builder: (context, studentsSnapshot) {
             if (studentsSnapshot.connectionState == ConnectionState.waiting) {
               return const LoadingView(message: 'Loading students...');
@@ -104,10 +124,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
             // Get payments and lessons to compute credit per student
             return StreamBuilder<List<Payment>>(
-              stream: _firestoreService.streamPaymentsForInstructor(widget.instructor.id),
+              stream: _paymentsStream,
               builder: (context, paymentsSnapshot) {
                 return StreamBuilder<List<Lesson>>(
-                  stream: _firestoreService.streamLessonsForInstructor(widget.instructor.id),
+                  stream: _lessonsStream,
                   builder: (context, lessonsSnapshot) {
                     final payments = paymentsSnapshot.data ?? [];
                     final lessons = lessonsSnapshot.data ?? [];
@@ -133,10 +153,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     };
 
                     // Feature 2.2: Filter students by search query
-                    final filteredStudents = _searchQuery.isEmpty
+                    final filteredStudents = _searchQuery.trim().isEmpty
                         ? students
                         : students.where((s) {
-                            final query = _searchQuery.toLowerCase();
+                            final query = _searchQuery.trim().toLowerCase();
                             return s.name.toLowerCase().contains(query) ||
                                 (s.phone ?? '').toLowerCase().contains(query) ||
                                 (s.email ?? '').toLowerCase().contains(query);
@@ -174,7 +194,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 ),
                               ),
                               onChanged: (value) {
-                                setState(() => _searchQuery = value.trim());
+                                // Use setState only for _searchQuery; streams are cached
+                                // so this won't cause StreamBuilder to resubscribe
+                                setState(() => _searchQuery = value);
                               },
                             ),
                           ),
@@ -231,7 +253,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 label: Text('$label ($count)'),
                 selected: selected,
                 onSelected: (_) {
-                  setState(() => _statusFilter = status);
+                  _updateStatusFilter(status);
                 },
                 avatar: status != 'all'
                     ? Icon(
@@ -1169,14 +1191,20 @@ class _StudentsScreenState extends State<StudentsScreen> {
               phone: phone,
               password: password, // Store password for instructor access
               studentId: studentId,
+              schoolId: widget.instructor.schoolId,
             );
             await _firestoreService.createUserProfile(profile);
           } else {
-            // Profile already exists - update studentId if needed
+            // Profile already exists - update studentId and schoolId if needed
+            final updates = <String, dynamic>{};
             if (existingProfile.studentId != studentId) {
-              await _firestoreService.updateUserProfile(user.uid, {
-                'studentId': studentId,
-              });
+              updates['studentId'] = studentId;
+            }
+            if (existingProfile.schoolId != widget.instructor.schoolId) {
+              updates['schoolId'] = widget.instructor.schoolId;
+            }
+            if (updates.isNotEmpty) {
+              await _firestoreService.updateUserProfile(user.uid, updates);
             }
             loginWarning = 'Login account already exists for this phone number';
           }
